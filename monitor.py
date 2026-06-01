@@ -579,10 +579,17 @@ if sdf["1D %"].notna().any():
 
 if layout == "Collapsible groups":
     for g in dict.fromkeys(r["Group"] for r in stock_rows):
-        grp = sort_rows([r for r in stock_rows if r["Group"] == g], sort_by, sort_desc)
+        grp = [r for r in stock_rows if r["Group"] == g]
         with st.expander(group_label(g, grp), expanded=expand_all):
-            gdf = pd.DataFrame(grp, columns=COLS).reset_index(drop=True)
-            render_table(gdf, [0] * len(grp), highlight_moves, key=f"grid_{g}")
+            for sg in dict.fromkeys(r["Sub-group"] for r in grp):
+                sg_rows = sort_rows([r for r in grp if r["Sub-group"] == sg], sort_by, sort_desc)
+                if sg:                                   # sub-group avg = one pinned row (no multi-pin bug)
+                    rows = [agg_row(sg_rows, f"–  {sg}")] + sg_rows
+                    levels = [1] + [0] * len(sg_rows)
+                else:                                    # group has no sub-groups: just its stocks
+                    rows, levels = sg_rows, [0] * len(sg_rows)
+                gdf = pd.DataFrame(rows, columns=COLS).reset_index(drop=True)
+                render_table(gdf, levels, highlight_moves, key=f"grid_{g}_{sg or 'main'}")
 else:
     flat = sort_rows(stock_rows, sort_by, sort_desc)
     df = pd.DataFrame(flat, columns=COLS).reset_index(drop=True)
