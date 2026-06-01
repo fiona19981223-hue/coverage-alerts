@@ -304,6 +304,24 @@ def style_block(df, levels, highlight=True):
     return df.style.apply(rstyle, axis=1).format(fmt, na_rep="—")
 
 
+def render_table(df, levels, highlight):
+    """Render as crisp HTML — the canvas-based st.dataframe renders blurry on phones."""
+    sty = (style_block(df, levels, highlight)
+           .hide(axis="index")
+           .set_table_styles([
+               {"selector": "", "props": [("border-collapse", "collapse"), ("width", "100%"),
+                                          ("font-size", "0.82rem"), ("color", "inherit")]},
+               {"selector": "th, td", "props": [("padding", "3px 8px"), ("text-align", "right"),
+                                                 ("white-space", "nowrap")]},
+               {"selector": "th", "props": [("border-bottom", "1px solid rgba(128,128,128,0.45)")]},
+               {"selector": "td:first-child, th:first-child", "props": [("text-align", "left")]},
+           ]))
+    st.markdown(
+        f'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;color:inherit;">{sty.to_html()}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def group_label(group, grp):
     """Markdown label for a group's expander: name + simple-avg returns (colored)."""
     ga = agg_row(grp, group)
@@ -509,13 +527,11 @@ if layout == "Collapsible groups":
         with st.expander(group_label(g, grp), expanded=expand_all):
             grows, glevels = assemble_group(grp)
             gdf = pd.DataFrame(grows, columns=COLS).reset_index(drop=True)
-            st.dataframe(style_block(gdf, glevels, highlight=highlight_moves), width="stretch",
-                         hide_index=True, height=min(34 * len(gdf) + 38, 640))
+            render_table(gdf, glevels, highlight_moves)
 else:
     rows, levels = assemble(stock_rows, include_aggs=show_groups)
     df = pd.DataFrame(rows, columns=COLS).reset_index(drop=True)
-    st.dataframe(style_block(df, levels, highlight=highlight_moves), width="stretch",
-                 hide_index=True, height=min(34 * len(df) + 40, 1100))
+    render_table(df, levels, highlight_moves)
 
 st.caption(f"Last updated **{datetime.now():%H:%M:%S}**  ·  "
            + (f"🔄 auto-refresh every {interval}s · refresh #{tick}" if auto else "⏸ auto-refresh OFF")
