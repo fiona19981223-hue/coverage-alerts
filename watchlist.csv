@@ -1,0 +1,66 @@
+﻿group,subgroup,name,ticker,bbg,currency
+China Internet,,KWEB,KWEB,KWEB US,USD
+China Internet,,Tencent,0700.HK,700 HK,HKD
+China Internet,,Alibaba,BABA,BABA US,USD
+China Internet,,Baidu,BIDU,BIDU US,USD
+China Internet,,JD.com,JD,JD US,USD
+China Internet,,Pinduoduo,PDD,PDD US,USD
+China Internet,,Meituan,3690.HK,3690 HK,HKD
+China Internet,,Zhipu,2513.HK,2513 HK,HKD
+China Internet,,Minimax,0100.HK,100 HK,HKD
+China Internet,,Kanzhun,BZ,BZ US,USD
+China Data Center,,VNET,VNET,VNET US,USD
+China Data Center,,GDS,GDS,GDS US,USD
+China Data Center,,Range,300442.SZ,300442 CH,CNY
+China Fintech,,Futu,FUTU,FUTU US,USD
+China Fintech,,UP Fintech,TIGR,TIGR US,USD
+China Software,ERP,Kingdee,0268.HK,268 HK,HKD
+China Software,ERP,Yonyou,600588.SS,600588 CH,CNY
+China Software,ERP,Digiwin,300378.SZ,300378 CH,CNY
+China Software,ERP,Hand Enterprise,300170.SZ,300170 CH,CNY
+China Software,System Integrator,Chinasoft,0354.HK,354 HK,HKD
+China Software,System Integrator,iSoftstone,301236.SZ,301236 CH,CNY
+China Software,Applications,Meitu,1357.HK,1357 HK,HKD
+China Software,Applications,Kingsoft Corp,3888.HK,3888 HK,HKD
+China Software,Applications,Kingsoft Office,688111.SS,688111 CH,CNY
+China Software,Applications,Intsig,688615.SS,688615 CH,CNY
+China Software,Applications,Eazytec,688258.SS,688258 CH,CNY
+China Software,Applications,Tuya,TUYA,Tuya US,USD
+China Software,Applications,Agora,API,API US,USD
+China Software,Vertical software,Supcon,688777.SS,688777 CH,CNY
+China Software,Vertical software,Hundsun Tech,600570.SS,600570 CH,CNY
+China Software,Vertical software,Winnning Health,300253.SZ,300253 CH,CNY
+China Software,Vertical software,Longshine,300682.SZ,300682 CH,CNY
+China thematic,AI glasses,Conant Optical,2276.HK,2276 HK,HKD
+China thematic,AI glasses,Mingyue,301101.SZ,301101 CH,CNY
+China thematic,AI glasses,Doctorglass,300622.SZ,300622 CH,CNY
+China thematic,AI glasses,Goertek,002241.SZ,002241 CH,CNY
+China thematic,AI glasses,Luxshare,002475.SZ,002475 CH,CNY
+China thematic,AI glasses,Lens Tech,300433.SZ,300433 CH,CNY
+China thematic,AI glasses,Longcheer,603341.SS,603341 CH,CNY
+China thematic,AI glasses,Crystal-Optech,002273.SZ,002273 CH,CNY
+China thematic,AI glasses,Lante Optics,688127.SS,688127 CH,CNY
+China thematic,AI glasses,Highpower,001283.SZ,001283 CH,CNY
+China thematic,AI glasses,Bestechnic,688608.SS,688608 CH,CNY
+JP software,System Integrator,Fujitsu,6702.T,6702 JP,JPY
+JP software,System Integrator,Hitachi,6501.T,6501 JP,JPY
+JP software,System Integrator,NEC Corp,6701.T,6701 JP,JPY
+JP software,System Integrator,Nomura Research Institute,4307.T,4307 JP,JPY
+JP software,AI-native,PKSHA,3993.T,3993 JP,JPY
+JP software,AI-native,Exawizards,4259.T,4259 JP,JPY
+JP software,AI-native,ABEJA,5574.T,5574 JP,JPY
+JP software,AI-native,Laboro.AI,5586.T,5586 JP,JPY
+JP software,Software,Appier,4180.T,4180 JP,JPY
+JP software,Software,Rakus,3923.T,3923 JP,JPY
+JP software,Software,Recruit,6098.T,6098 JP,JPY
+JP software,Fintech,Rakuten Bank,5838.T,5838 JP,JPY
+JP software,Fintech,SBI Shinsei Bank,8303.T,8303 JP,JPY
+SEA Internet,,Sea,SE,SE US,USD
+SEA Internet,,Grab,GRAB,GRAB US,USD
+SEA Internet,,Goto Gojek,GOTO.JK,GOTO US,IDR
+Special sits,,CK Hutchison,0001.HK,1 HK,HKD
+Special sits,,Dentsu,4324.T,4324 JP,JPY
+Special sits,,Kansai Electric,9503.T,9503 JP,JPY
+Special sits,,CP ALL,CPALL.BK,CPALL TB,THB
+Special sits,,CP Axtra,CPAXT.BK,CPAXT TB,THB
+Special sits,,Makemytrip,MMYT,MMYT US,USD

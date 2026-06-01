@@ -1,0 +1,8 @@
+# --- secrets: never commit ---
+.streamlit/secrets.toml
+secrets.toml
+alerts_config.json
+
+# --- python / local junk ---
+__pycache__/
+*.pyc
