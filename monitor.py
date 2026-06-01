@@ -251,6 +251,14 @@ def _num(x):
         return None
 
 
+def _clip(v, lo, hi):
+    """Keep v only if it's a finite number within [lo, hi]; else None ('n.m.' → blank).
+    Stops pre-revenue / sign-flip outliers (e.g. -2368% margin) from distorting group averages."""
+    if v is None or pd.isna(v):
+        return None
+    return v if lo <= v <= hi else None
+
+
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_fundamentals(tickers: tuple) -> dict:
     """Per-name valuation / growth / quality (cached 6h). Cloud-robust: ROE, net margin and
@@ -433,10 +441,13 @@ def fund_row(meta, f, aks):
     return {
         "Group": meta["group"], "Sub-group": meta["subgroup"], "Name": meta["name"],
         "Ticker": t, "CCY": meta["currency"],
-        "Fwd P/E": fwd_pe,
-        "Rev gr LFY %": f.get("rev_lfy_pct"), "Rev gr FY1 %": f.get("rev_fy1_pct"),
-        "EPS gr LFY %": f.get("eps_lfy_pct"), "EPS gr FY1 %": eps_fy1,
-        "ROE %": f.get("roe_pct"), "Margin %": f.get("margin_pct"),
+        "Fwd P/E": _clip(fwd_pe, 0.01, 300),
+        "Rev gr LFY %": _clip(f.get("rev_lfy_pct"), -300, 300),
+        "Rev gr FY1 %": _clip(f.get("rev_fy1_pct"), -300, 300),
+        "EPS gr LFY %": _clip(f.get("eps_lfy_pct"), -300, 300),
+        "EPS gr FY1 %": _clip(eps_fy1, -300, 300),
+        "ROE %": _clip(f.get("roe_pct"), -150, 150),
+        "Margin %": _clip(f.get("margin_pct"), -100, 100),
     }
 
 
@@ -803,8 +814,13 @@ with st.sidebar:
         sort_by = st.selectbox("Sort names by", sort_opts, index=0,
                                help="Reorders names within each group / sub-group.")
         sort_desc = st.toggle("High → low", value=True, help="Off = low → high (A→Z for Name).")
-        auto = st.toggle("Auto-refresh", value=True)
-        interval = st.slider("Refresh every (seconds)", 15, 300, 60, step=15)
+        if view == "Returns":
+            auto = st.toggle("Auto-refresh", value=True)
+            interval = st.slider("Refresh every (seconds)", 15, 300, 60, step=15)
+        else:
+            auto, interval = False, 60
+            st.caption("Fundamentals pull once when you open this view (then cached ~6h) — no auto-refresh, "
+                       "to avoid Yahoo rate-limits. Hit 🔄 Refresh now to force a fresh pull.")
         st.divider()
         if st.button("🔄 Refresh now"):
             fetch_history.clear(); fetch_fx.clear(); fetch_mktcap.clear()
