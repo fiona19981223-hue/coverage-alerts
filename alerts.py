@@ -119,7 +119,7 @@ def main():
              ["This is a test. Outsized-move alerts will arrive here.",
               "Thresholds: " + " · ".join(f"{p} ≥{v}%" for p, v in thr.items())]),
             ("",   # a sample in the real alert format, sent as its own message (shows one-by-one)
-             ["Ticker: 9866 HK Equity (Nio)", "Stock: +6.35%", "Price: 45.20 (prev 42.50)", "— sample format —"]),
+             ["🟢 Ticker: 9866 HK Equity (Nio)", "Stock: +6.35%", "Price: 45.20 (prev 42.50)", "— sample format —"]),
         ]
         for i, (title, lines) in enumerate(msgs):
             status, body = send_teams(url, title, lines)
@@ -164,8 +164,9 @@ def main():
         for p, v in hits:
             key = f"{t}|{p}|{bar}"
             new_keys.append(key)
+            dot = "🟢" if v > 0 else ("🔴" if v < 0 else "⚪")
             movers.append((key, [
-                f"Ticker: {label} ({r['name']})",
+                f"{dot} Ticker: {label} ({r['name']})",
                 f"Stock: {v:+.2f}%",
                 f"Price: {last:,.2f} (prev {prev:,.2f})",
             ]))
