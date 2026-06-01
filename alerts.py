@@ -146,6 +146,11 @@ def main():
             s = hist[t]["Close"].dropna() if len(tickers) > 1 else hist["Close"].dropna()
         except Exception:
             s = None
+        if s is None or len(s) == 0:           # self-heal: retry a ticker the batch dropped
+            try:
+                s = yf.Ticker(t).history(period="2y", interval="1d", auto_adjust=False)["Close"].dropna()
+            except Exception:
+                s = None
         if s is None or len(s) < 2:
             continue
         m, bar = moves(s)

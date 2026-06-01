@@ -147,13 +147,21 @@ def load_watchlist() -> pd.DataFrame:
 
 @st.cache_data(ttl=120, show_spinner=False)
 def fetch_history(tickers: tuple) -> dict:
-    """Daily closes (2y) per ticker. Cached 2 min (Yahoo free data is ~15-min delayed anyway)."""
+    """Daily closes (2y) per ticker, cached 2 min. Any ticker the big batch drops
+    (Yahoo intermittently drops names from large batches, esp. from cloud IPs) is
+    retried individually so it doesn't silently vanish from the dashboard."""
     raw = yf.download(list(tickers), period="2y", interval="1d", auto_adjust=False,
                       group_by="ticker", threads=True, progress=False)
     out = {}
     for t in tickers:
         try:
             s = raw[t]["Close"].dropna() if len(tickers) > 1 else raw["Close"].dropna()
+            out[t] = s if len(s) else None
+        except Exception:
+            out[t] = None
+    for t in [t for t in tickers if out.get(t) is None]:   # self-heal dropped tickers
+        try:
+            s = yf.Ticker(t).history(period="2y", interval="1d", auto_adjust=False)["Close"].dropna()
             out[t] = s if len(s) else None
         except Exception:
             out[t] = None
