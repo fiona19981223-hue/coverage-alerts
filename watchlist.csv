@@ -1,4 +1,4 @@
-﻿group,subgroup,name,ticker,bbg,currency
+group,subgroup,name,ticker,bbg,currency
 China Internet,,KWEB,KWEB,KWEB US,USD
 China Internet,,Tencent,0700.HK,700 HK,HKD
 China Internet,,Alibaba,BABA,BABA US,USD
@@ -64,3 +64,4 @@ Special sits,,Kansai Electric,9503.T,9503 JP,JPY
 Special sits,,CP ALL,CPALL.BK,CPALL TB,THB
 Special sits,,CP Axtra,CPAXT.BK,CPAXT TB,THB
 Special sits,,Makemytrip,MMYT,MMYT US,USD
+Other ALC names,BE supply chain,Acbel,6282.TW,6282 TT,TWD
