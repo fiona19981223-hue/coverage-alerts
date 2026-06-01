@@ -38,7 +38,9 @@ COLS = ["Name", "Ticker", "CCY", "Price", "Mkt Cap $bn",
         "1D %", "1W %", "1M %", "3M %", "1Yr %"]
 PCT = ["1D %", "1W %", "1M %", "3M %", "1Yr %"]
 FX_SYMS = {"HKD": "HKDUSD=X", "CNY": "CNYUSD=X", "JPY": "JPYUSD=X",
-           "THB": "THBUSD=X", "IDR": "IDRUSD=X"}
+           "THB": "THBUSD=X", "IDR": "IDRUSD=X", "TWD": "TWDUSD=X",
+           "KRW": "KRWUSD=X", "SGD": "SGDUSD=X", "INR": "INRUSD=X",
+           "GBP": "GBPUSD=X", "EUR": "EURUSD=X", "AUD": "AUDUSD=X"}
 TODAY = pd.Timestamp(datetime.now()).normalize()   # trailing returns anchor to *today*, like Yahoo
 
 st.set_page_config(page_title="Coverage Monitor", page_icon="📊", layout="wide")
@@ -314,11 +316,16 @@ def ccy_from_yahoo(t: str) -> str:
     """Best-effort trading currency from a Yahoo symbol suffix."""
     t = (t or "").upper().strip()
     if t.endswith(".HK"): return "HKD"
+    if t.endswith((".TW", ".TWO")): return "TWD"
     if t.endswith(".T"): return "JPY"
     if t.endswith((".SS", ".SZ")): return "CNY"
     if t.endswith(".BK"): return "THB"
     if t.endswith(".JK"): return "IDR"
     if t.endswith((".KS", ".KQ")): return "KRW"
+    if t.endswith(".SI"): return "SGD"
+    if t.endswith((".NS", ".BO")): return "INR"
+    if t.endswith(".L"): return "GBP"
+    if t.endswith(".AX"): return "AUD"
     if t.startswith("^") or "." in t: return ""   # index / other exchange — leave blank
     return "USD"                                   # plain symbol = US listing
 
