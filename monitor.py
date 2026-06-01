@@ -243,9 +243,24 @@ def agg_row(rows, name):
     return d
 
 
-def assemble(stock_rows, include_aggs=True):
-    """Group & sub-group summary rows (simple avg of %, sum of mkt cap) placed
-    ABOVE their members. include_aggs=False hides all summary rows. Returns (rows, levels)."""
+def sort_rows(rows, sort_by, desc):
+    """Order stock rows within a bucket. 'Group order' = leave as-is; NaN/None always last."""
+    if sort_by in (None, "Group order"):
+        return list(rows)
+    if sort_by == "Name":
+        return sorted(rows, key=lambda r: str(r.get("Name", "")).lower(), reverse=desc)
+
+    def key(r):
+        v = r.get(sort_by)
+        if v is None or pd.isna(v):
+            return (1, 0.0)                          # missing -> last
+        return (0, -float(v) if desc else float(v))
+    return sorted(rows, key=key)
+
+
+def assemble(stock_rows, include_aggs=True, sort_by="Group order", desc=True):
+    """Group & sub-group summary rows (simple avg of %, sum of mkt cap) placed ABOVE
+    their members; stocks within each bucket ordered by sort_by. Returns (rows, levels)."""
     rows, levels = [], []
     groups = list(dict.fromkeys(r["Group"] for r in stock_rows))
     for g in groups:
@@ -256,18 +271,20 @@ def assemble(stock_rows, include_aggs=True):
             sg_rows = [r for r in grp if r["Sub-group"] == sg]
             if include_aggs and sg:
                 rows.append(agg_row(sg_rows, f"–  {sg}")); levels.append(1)  # sub-group summary
-            rows.extend(sg_rows); levels.extend([0] * len(sg_rows))
+            ordered = sort_rows(sg_rows, sort_by, desc)
+            rows.extend(ordered); levels.extend([0] * len(ordered))
     return rows, levels
 
 
-def assemble_group(grp):
-    """Rows for ONE group: sub-group avg rows + their stocks (no group-level row)."""
+def assemble_group(grp, sort_by="Group order", desc=True):
+    """Rows for ONE group: sub-group avg rows + their stocks (sorted within each)."""
     rows, levels = [], []
     for sg in dict.fromkeys(r["Sub-group"] for r in grp):
         sg_rows = [r for r in grp if r["Sub-group"] == sg]
         if sg:
             rows.append(agg_row(sg_rows, f"–  {sg}")); levels.append(1)
-        rows.extend(sg_rows); levels.extend([0] * len(sg_rows))
+        ordered = sort_rows(sg_rows, sort_by, desc)
+        rows.extend(ordered); levels.extend([0] * len(ordered))
     return rows, levels
 
 
@@ -472,6 +489,10 @@ with st.sidebar:
                                     help="One-click hide of all group & sub-group summary rows.")
         highlight_moves = st.toggle("Highlight big moves", value=True,
                                     help="Shade a cell green/red for outsized moves: 1D≥5% · 1W≥10% · 1M≥20% · 3M≥30% · 1Yr≥50%.")
+        sort_by = st.selectbox("Sort names by",
+                               ["Group order", "1D %", "1W %", "1M %", "3M %", "1Yr %", "Price", "Mkt Cap $bn", "Name"],
+                               index=0, help="Reorders names within each group / sub-group.")
+        sort_desc = st.toggle("High → low", value=True, help="Off = low → high (A→Z for Name).")
         auto = st.toggle("Auto-refresh", value=True)
         interval = st.slider("Refresh every (seconds)", 15, 300, 60, step=15)
         st.divider()
@@ -525,11 +546,11 @@ if layout == "Collapsible groups":
     for g in dict.fromkeys(r["Group"] for r in stock_rows):
         grp = [r for r in stock_rows if r["Group"] == g]
         with st.expander(group_label(g, grp), expanded=expand_all):
-            grows, glevels = assemble_group(grp)
+            grows, glevels = assemble_group(grp, sort_by, sort_desc)
             gdf = pd.DataFrame(grows, columns=COLS).reset_index(drop=True)
             render_table(gdf, glevels, highlight_moves)
 else:
-    rows, levels = assemble(stock_rows, include_aggs=show_groups)
+    rows, levels = assemble(stock_rows, include_aggs=show_groups, sort_by=sort_by, desc=sort_desc)
     df = pd.DataFrame(rows, columns=COLS).reset_index(drop=True)
     render_table(df, levels, highlight_moves)
 
