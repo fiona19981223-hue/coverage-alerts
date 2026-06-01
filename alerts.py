@@ -14,6 +14,7 @@ Setup:
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -94,7 +95,8 @@ def send_teams(url, title, lines):
     # Plain-text/HTML payload for a Power Automate "Post message in a chat or channel" flow
     # whose Message field = the expression  triggerBody()?['text'].  Teams renders basic HTML
     # (<b>, <br>), so the alert shows as a normal channel message instead of an adaptive card.
-    text = f"<b>{title}</b><br><br>" + "<br>".join(lines)
+    head = f"<b>{title}</b><br><br>" if title else ""
+    text = head + "<br>".join(lines)
     data = json.dumps({"text": text}).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
@@ -112,10 +114,18 @@ def main():
     thr = {**MOVE_THRESH, **cfg.get("thresholds", {})}
 
     if "--test" in sys.argv:
-        status, body = send_teams(url, "✅ Coverage Monitor — alerts connected",
-                                  ["This is a test. Outsized-move alerts will arrive here.",
-                                   "Thresholds: " + " · ".join(f"{p} ≥{v}%" for p, v in thr.items())])
-        print(f"Test send -> HTTP {status}. {body}")
+        msgs = [
+            ("✅ Coverage Monitor — alerts connected",
+             ["This is a test. Outsized-move alerts will arrive here.",
+              "Thresholds: " + " · ".join(f"{p} ≥{v}%" for p, v in thr.items())]),
+            ("",   # a sample in the real alert format, sent as its own message (shows one-by-one)
+             ["Ticker: 9866 HK Equity (Nio)", "Stock: +6.35%", "Price: 45.20 (prev 42.50)", "— sample format —"]),
+        ]
+        for i, (title, lines) in enumerate(msgs):
+            status, body = send_teams(url, title, lines)
+            print(f"Test send -> HTTP {status}. {body}")
+            if i < len(msgs) - 1:
+                time.sleep(1.5)
         return
 
     seed = "--seed" in sys.argv   # record current movers WITHOUT sending (clean first run)
@@ -129,7 +139,7 @@ def main():
                        group_by="ticker", threads=True, progress=False)
 
     state = load_state()
-    alerts, new_keys = [], []
+    movers, new_keys = [], []     # movers: list of (state_key, [lines]) — one Teams message each
     for _, r in wl.iterrows():
         t = r["ticker"]
         try:
@@ -144,34 +154,44 @@ def main():
         if s is None or len(s) < 2:
             continue
         m, bar = moves(s)
-        hits = [(p, v) for p, v in m.items() if p in thr and v is not None and abs(v) >= thr[p]]
-        hits = [(p, v) for p, v in hits if f"{t}|{p}|{bar}" not in state]
+        hits = [(p, v) for p, v in m.items()
+                if p in thr and v is not None and abs(v) >= thr[p] and f"{t}|{p}|{bar}" not in state]
         if not hits:
             continue
-        for p, _ in hits:
-            new_keys.append(f"{t}|{p}|{bar}")
-        signs = {("+" if v > 0 else "-") for _, v in hits}
-        dot = "🟢" if signs == {"+"} else ("🔴" if signs == {"-"} else "🔵")
-        movestr = " · ".join(f"{p} {v:+.1f}%" for p, v in hits)
-        alerts.append(f"{dot} <b>{r['name']}</b> ({t}): {movestr}")
+        last, prev = float(s.iloc[-1]), float(s.iloc[-2])   # prev = prior close (the 1D reference)
+        bbg = str(r.get("bbg", "")).strip()
+        label = f"{bbg} Equity" if bbg else t               # e.g. "9866 HK Equity"; fallback = Yahoo ticker
+        for p, v in hits:
+            key = f"{t}|{p}|{bar}"
+            new_keys.append(key)
+            movers.append((key, [
+                f"Ticker: {label} ({r['name']})",
+                f"Stock: {v:+.2f}%",
+                f"Price: {last:,.2f} (prev {prev:,.2f})",
+            ]))
 
     if seed:
         save_state(state | set(new_keys))
-        print(f"Seeded {len(new_keys)} current moves across {len(alerts)} names — "
-              "future runs will alert only NEW moves.")
+        print(f"Seeded {len(new_keys)} current moves — future runs will alert only NEW moves.")
         return
 
-    if not alerts:
+    if not movers:
         print("No new outsized moves.")
         return
 
-    title = f"🚨 Outsized moves — {len(alerts)} name(s) — {pd.Timestamp.now():%Y-%m-%d %H:%M}"
-    status, body = send_teams(url, title, alerts)
-    if status in (200, 202):
-        save_state(state | set(new_keys))
-        print(f"Alerted {len(alerts)} names (HTTP {status}).")
-    else:
-        print(f"Send FAILED (HTTP {status}): {body}. State not updated, will retry next run.")
+    # Fire one message per mover (paced so Power Automate / Teams don't throttle a burst).
+    sent_keys, sent = [], 0
+    for i, (key, lines) in enumerate(movers):
+        status, body = send_teams(url, "", lines)           # no title -> bare 3-line message
+        if status in (200, 202):
+            sent += 1; sent_keys.append(key)
+        else:
+            print(f"Send FAILED for {key} (HTTP {status}): {body}")
+        if i < len(movers) - 1:
+            time.sleep(1.5)
+    if sent_keys:
+        save_state(state | set(sent_keys))                  # only mark as seen what actually sent
+    print(f"Sent {sent}/{len(movers)} message(s).")
 
 
 if __name__ == "__main__":
