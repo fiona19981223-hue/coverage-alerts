@@ -293,19 +293,23 @@ MOVE_THRESH = {"1D %": 5, "1W %": 10, "1M %": 20, "3M %": 30, "1Yr %": 50}
 
 # Make the AgGrid blend into the page (no grey box) — transparent bg, no borders.
 AGGRID_CSS = {
-    # recolor via theme VARIABLES (not !important on cells) so the green/red
-    # highlight bands + pinned-row shading still show on top.
+    # theme variables (belt) ...
     ".ag-root-wrapper, .ag-theme-streamlit, .ag-theme-streamlit-dark": {
-        "--ag-background-color": "transparent",
-        "--ag-odd-row-background-color": "transparent",
-        "--ag-header-background-color": "transparent",
-        "--ag-row-hover-color": "rgba(125,125,125,0.12)",
-        "--ag-border-color": "rgba(128,128,128,0.22)",
+        "--ag-background-color": "transparent", "--ag-odd-row-background-color": "transparent",
+        "--ag-header-background-color": "transparent", "--ag-control-panel-background-color": "transparent",
+        "--ag-row-hover-color": "rgba(125,125,125,0.12)", "--ag-border-color": "rgba(128,128,128,0.22)",
         "--ag-row-border-color": "rgba(128,128,128,0.10)",
-        "background": "transparent",
-        "border": "none",
     },
-    ".ag-header": {"border-bottom": "1px solid rgba(128,128,128,0.35)"},
+    # ... and direct overrides (suspenders) on every grey container — NOT .ag-cell, so
+    # the inline green/red highlight bands survive.
+    (".ag-root-wrapper, .ag-body, .ag-body-viewport, .ag-center-cols-clipper, "
+     ".ag-center-cols-viewport, .ag-center-cols-container, .ag-body-horizontal-scroll-viewport, "
+     ".ag-header, .ag-header-viewport, .ag-header-container, .ag-floating-top, "
+     ".ag-floating-top-viewport, .ag-pinned-left-cols-container, .ag-virtual-list-viewport, .ag-row"):
+        {"background-color": "transparent !important"},
+    ".ag-floating-top .ag-row": {"background-color": "rgba(128,128,128,0.18) !important"},
+    ".ag-header": {"border-bottom": "1px solid rgba(128,128,128,0.35) !important"},
+    ".ag-root-wrapper": {"border": "none !important"},
 }
 
 
