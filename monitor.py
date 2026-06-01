@@ -360,6 +360,58 @@ def edit_watchlist_ui(wl_all):
                        "Toggle off ✏️ Edit watchlist to view the live monitor.")
 
 
+def reorder_watchlist_ui(wl_all):
+    st.subheader("↕ Reorder coverage (drag & drop)")
+    st.info("Drag a name up/down to reorder it, or drag it into another group/sub-group box to **move** it there. "
+            "Then click **Save order**. (To create a brand-new group, use ✏️ Edit watchlist.)")
+    try:
+        from streamlit_sortables import sort_items
+    except ImportError:
+        st.error("Drag component not available (streamlit-sortables not installed).")
+        return
+
+    cols = ["group", "subgroup", "name", "ticker", "bbg", "currency"]
+    df = wl_all.reindex(columns=cols).fillna("")
+
+    by_ticker, header_key, buckets, bidx, label_ticker = {}, {}, [], {}, {}
+    for _, r in df.iterrows():
+        r = r.to_dict()
+        key = (r["group"], r["subgroup"])
+        header = r["group"] + (f"  —  {r['subgroup']}" if r["subgroup"] else "")
+        if key not in bidx:
+            bidx[key] = len(buckets)
+            buckets.append({"header": header, "items": []})
+            header_key[header] = key
+        label = f"{r['name']}  ·  {r['ticker']}"
+        buckets[bidx[key]]["items"].append(label)
+        label_ticker[label] = r["ticker"]
+        by_ticker[r["ticker"]] = r
+
+    new_layout = sort_items(buckets, multi_containers=True, direction="vertical", key="reorder")
+
+    if st.button("💾 Save order", type="primary"):
+        rows = []
+        for bucket in new_layout:
+            g, sg = header_key.get(bucket["header"], ("", ""))
+            for label in bucket["items"]:
+                t = label_ticker.get(label)
+                if t:
+                    row = dict(by_ticker[t]); row["group"], row["subgroup"] = g, sg
+                    rows.append(row)
+        if len(rows) != len(by_ticker):
+            st.error("Reorder didn't map cleanly — not saved. Refresh and retry.")
+            return
+        text = pd.DataFrame(rows, columns=cols).to_csv(index=False)
+        try:
+            save_watchlist_text(text)
+        except Exception as e:
+            st.error(f"Save failed: {e}")
+        else:
+            fetch_history.clear(); fetch_fx.clear(); fetch_mktcap.clear()
+            where = "GitHub (cloud — alerts will follow)" if gh_enabled() else WATCHLIST.name
+            st.success(f"New order saved to {where}. Toggle off ↕ Reorder to view the monitor.")
+
+
 # ---------------- UI ----------------
 st.title("📊 Coverage Monitor")
 st.caption("Price return · 1D vs prior close · 1W = Yahoo 5-day · 1M/3M trailing from last close · 1Yr = 52-week change · tuned to match Yahoo · "
@@ -372,7 +424,9 @@ with st.sidebar:
     st.header("Settings")
     edit_mode = st.toggle("✏️ Edit watchlist", value=False,
                           help="Add or remove names, then Save. Auto-refresh pauses while editing.")
-    if not edit_mode:
+    reorder_mode = st.toggle("↕ Reorder (drag)", value=False,
+                             help="Drag names to reorder, or between group boxes to move them. Then Save.")
+    if not (edit_mode or reorder_mode):
         picked = st.multiselect("Groups", all_groups, default=all_groups)
         layout = st.radio("Layout", ["Collapsible groups", "Single table"], index=0,
                           help="Collapsible: click a group header to expand/collapse its names.")
@@ -394,6 +448,9 @@ with st.sidebar:
 
 if edit_mode:
     edit_watchlist_ui(wl_all)
+    st.stop()
+if reorder_mode:
+    reorder_watchlist_ui(wl_all)
     st.stop()
 
 wl = wl_all[wl_all["group"].isin(picked)] if picked else wl_all
