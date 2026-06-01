@@ -27,7 +27,8 @@ CONFIG = BASE / "alerts_config.json"
 STATE = BASE / "alerts_state.json"
 
 TODAY = pd.Timestamp(pd.Timestamp.now()).normalize()
-MOVE_THRESH = {"1D": 5, "1W": 10, "1M": 20, "3M": 30, "1Yr": 50}
+MOVE_THRESH = {"1D": 5}   # alert on 1D moves only. To also alert on longer horizons,
+# re-add e.g. "1W": 10, "1M": 20, "3M": 30, "1Yr": 50 (the dashboard still shows all of them).
 
 
 def load_config():
@@ -124,7 +125,7 @@ def main():
     if "--test" in sys.argv:
         status, body = send_teams(url, "✅ Coverage Monitor — alerts connected",
                                   ["This is a test. Outsized-move alerts will arrive here.",
-                                   f"Thresholds: 1D ≥{thr['1D']}% · 1W ≥{thr['1W']}% · 1M ≥{thr['1M']}% · 3M ≥{thr['3M']}% · 1Yr ≥{thr['1Yr']}%"])
+                                   "Thresholds: " + " · ".join(f"{p} ≥{v}%" for p, v in thr.items())])
         print(f"Test send -> HTTP {status}. {body}")
         return
 
@@ -154,7 +155,7 @@ def main():
         if s is None or len(s) < 2:
             continue
         m, bar = moves(s)
-        hits = [(p, v) for p, v in m.items() if v is not None and abs(v) >= thr[p]]
+        hits = [(p, v) for p, v in m.items() if p in thr and v is not None and abs(v) >= thr[p]]
         hits = [(p, v) for p, v in hits if f"{t}|{p}|{bar}" not in state]
         if not hits:
             continue
