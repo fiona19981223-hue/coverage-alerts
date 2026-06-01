@@ -291,6 +291,23 @@ def assemble_group(grp, sort_by="Group order", desc=True):
 # "Outsized move" thresholds per horizon → cell gets a green/red background.
 MOVE_THRESH = {"1D %": 5, "1W %": 10, "1M %": 20, "3M %": 30, "1Yr %": 50}
 
+# Make the AgGrid blend into the page (no grey box) — transparent bg, no borders.
+AGGRID_CSS = {
+    # recolor via theme VARIABLES (not !important on cells) so the green/red
+    # highlight bands + pinned-row shading still show on top.
+    ".ag-root-wrapper, .ag-theme-streamlit, .ag-theme-streamlit-dark": {
+        "--ag-background-color": "transparent",
+        "--ag-odd-row-background-color": "transparent",
+        "--ag-header-background-color": "transparent",
+        "--ag-row-hover-color": "rgba(125,125,125,0.12)",
+        "--ag-border-color": "rgba(128,128,128,0.22)",
+        "--ag-row-border-color": "rgba(128,128,128,0.10)",
+        "background": "transparent",
+        "border": "none",
+    },
+    ".ag-header": {"border-bottom": "1px solid rgba(128,128,128,0.35)"},
+}
+
 
 def style_block(df, levels, highlight=True):
     cols = list(df.columns)
@@ -371,7 +388,8 @@ def render_table(df, levels, highlight, key):
 
     n = len(main_df) + len(pinned)
     AgGrid(main_df, gridOptions=opts, allow_unsafe_jscode=True, theme="streamlit",
-           fit_columns_on_grid_load=False, key=key, height=min(n * 31 + 50, 1100))
+           custom_css=AGGRID_CSS, fit_columns_on_grid_load=False, key=key,
+           height=min(n * 31 + 50, 1100))
 
 
 def group_label(group, grp):
