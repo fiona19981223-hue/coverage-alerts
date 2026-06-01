@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
+      - run: pip install yfinance pandas   # alerts.py only needs these (dashboard deps live in requirements.txt)
       - name: Run alerts
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
