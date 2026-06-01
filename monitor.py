@@ -321,22 +321,57 @@ def style_block(df, levels, highlight=True):
     return df.style.apply(rstyle, axis=1).format(fmt, na_rep="—")
 
 
-def render_table(df, levels, highlight):
-    """Render as crisp HTML — the canvas-based st.dataframe renders blurry on phones."""
-    sty = (style_block(df, levels, highlight)
-           .hide(axis="index")
-           .set_table_styles([
-               {"selector": "", "props": [("border-collapse", "collapse"), ("width", "100%"),
-                                          ("font-size", "0.82rem"), ("color", "inherit")]},
-               {"selector": "th, td", "props": [("padding", "3px 8px"), ("text-align", "right"),
-                                                 ("white-space", "nowrap")]},
-               {"selector": "th", "props": [("border-bottom", "1px solid rgba(128,128,128,0.45)")]},
-               {"selector": "td:first-child, th:first-child", "props": [("text-align", "left")]},
-           ]))
-    st.markdown(
-        f'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;color:inherit;">{sty.to_html()}</div>',
-        unsafe_allow_html=True,
-    )
+def render_table(df, levels, highlight, key):
+    """Interactive AgGrid (DOM-rendered → crisp on mobile, tap headers to sort, swipe to scroll).
+    Aggregate rows (group/sub-group avgs) are PINNED on top so sorting the stocks doesn't jumble them."""
+    try:
+        from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+    except ImportError:
+        st.dataframe(df, hide_index=True, width="stretch")
+        return
+
+    main, pinned = [], []
+    for row, lvl in zip(df.to_dict("records"), levels):
+        if lvl == 0:
+            main.append(row)
+        else:
+            r = {k: (None if pd.isna(v) else v) for k, v in row.items()}   # JSON-safe: NaN -> null
+            r["_lvl"] = lvl
+            pinned.append(r)
+    main_df = pd.DataFrame(main if main else [], columns=COLS)
+
+    pct_fmt = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':(p.value>=0?'+':'')+Number(p.value).toFixed(1)+'%';}")
+    num2 = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':Number(p.value).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}")
+    num1 = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':Number(p.value).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});}")
+    row_style = JsCode("function(p){if(p.node.rowPinned){var l=p.data['_lvl'];"
+                       "return l==2?{'fontWeight':'700','backgroundColor':'rgba(128,128,128,0.22)'}:"
+                       "{'fontWeight':'600','backgroundColor':'rgba(128,128,128,0.11)'};}return null;}")
+    hl = "true" if highlight else "false"
+
+    def pct_style(thr):
+        return JsCode("function(p){var v=p.value;if(v==null||isNaN(v))return{'color':'#9ca3af'};"
+                      "var s={'color':v>0?'#16a34a':(v<0?'#dc2626':'#6b7280')};"
+                      "if(%s&&!p.node.rowPinned&&Math.abs(v)>=%d){s['backgroundColor']=v>0?'rgba(22,163,74,0.32)':'rgba(220,38,38,0.32)';}"
+                      "return s;}" % (hl, thr))
+
+    gb = GridOptionsBuilder.from_dataframe(main_df)
+    gb.configure_default_column(sortable=True, filter=False, resizable=True, suppressMenu=True)
+    gb.configure_column("Name", pinned="left", minWidth=150, sortable=True)
+    gb.configure_column("Ticker", width=92)
+    gb.configure_column("CCY", width=66)
+    gb.configure_column("Price", type=["numericColumn"], valueFormatter=num2, width=96)
+    gb.configure_column("Mkt Cap $bn", type=["numericColumn"], valueFormatter=num1, width=104)
+    for c in PCT:
+        gb.configure_column(c, type=["numericColumn"], valueFormatter=pct_fmt,
+                            cellStyle=pct_style(MOVE_THRESH[c]), width=82)
+    opts = gb.build()
+    opts["pinnedTopRowData"] = pinned
+    opts["getRowStyle"] = row_style
+    opts["suppressMovableColumns"] = True
+
+    n = len(main_df) + len(pinned)
+    AgGrid(main_df, gridOptions=opts, allow_unsafe_jscode=True, theme="streamlit",
+           fit_columns_on_grid_load=False, key=key, height=min(n * 31 + 50, 1100))
 
 
 def group_label(group, grp):
@@ -544,15 +579,14 @@ if sdf["1D %"].notna().any():
 
 if layout == "Collapsible groups":
     for g in dict.fromkeys(r["Group"] for r in stock_rows):
-        grp = [r for r in stock_rows if r["Group"] == g]
+        grp = sort_rows([r for r in stock_rows if r["Group"] == g], sort_by, sort_desc)
         with st.expander(group_label(g, grp), expanded=expand_all):
-            grows, glevels = assemble_group(grp, sort_by, sort_desc)
-            gdf = pd.DataFrame(grows, columns=COLS).reset_index(drop=True)
-            render_table(gdf, glevels, highlight_moves)
+            gdf = pd.DataFrame(grp, columns=COLS).reset_index(drop=True)
+            render_table(gdf, [0] * len(grp), highlight_moves, key=f"grid_{g}")
 else:
-    rows, levels = assemble(stock_rows, include_aggs=show_groups, sort_by=sort_by, desc=sort_desc)
-    df = pd.DataFrame(rows, columns=COLS).reset_index(drop=True)
-    render_table(df, levels, highlight_moves)
+    flat = sort_rows(stock_rows, sort_by, sort_desc)
+    df = pd.DataFrame(flat, columns=COLS).reset_index(drop=True)
+    render_table(df, [0] * len(flat), highlight_moves, key="grid_single")
 
 st.caption(f"Last updated **{datetime.now():%H:%M:%S}**  ·  "
            + (f"🔄 auto-refresh every {interval}s · refresh #{tick}" if auto else "⏸ auto-refresh OFF")
