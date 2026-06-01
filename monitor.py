@@ -66,7 +66,7 @@ def require_login():
         st.stop()
 
 
-require_login()
+# require_login()   # password gate removed at user request — re-enable this line to lock the app
 
 
 # ---------------- watchlist store (GitHub-backed, local fallback) ----------------
