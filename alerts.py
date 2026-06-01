@@ -91,22 +91,11 @@ def moves(s):
 
 
 def send_teams(url, title, lines):
-    card = {
-        "type": "message",
-        "attachments": [{
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": {
-                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                "type": "AdaptiveCard",
-                "version": "1.4",
-                "body": [
-                    {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True},
-                    {"type": "TextBlock", "text": "\n\n".join(lines), "wrap": True},
-                ],
-            },
-        }],
-    }
-    data = json.dumps(card).encode("utf-8")
+    # Plain-text/HTML payload for a Power Automate "Post message in a chat or channel" flow
+    # whose Message field = the expression  triggerBody()?['text'].  Teams renders basic HTML
+    # (<b>, <br>), so the alert shows as a normal channel message instead of an adaptive card.
+    text = f"<b>{title}</b><br><br>" + "<br>".join(lines)
+    data = json.dumps({"text": text}).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -164,7 +153,7 @@ def main():
         signs = {("+" if v > 0 else "-") for _, v in hits}
         dot = "🟢" if signs == {"+"} else ("🔴" if signs == {"-"} else "🔵")
         movestr = " · ".join(f"{p} {v:+.1f}%" for p, v in hits)
-        alerts.append(f"{dot} **{r['name']}** ({t}): {movestr}")
+        alerts.append(f"{dot} <b>{r['name']}</b> ({t}): {movestr}")
 
     if seed:
         save_state(state | set(new_keys))
