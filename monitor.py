@@ -310,7 +310,6 @@ AGGRID_CSS = {
     ".ag-floating-top .ag-row": {"background-color": "rgba(128,128,128,0.18) !important"},
     ".ag-header": {"border-bottom": "1px solid rgba(128,128,128,0.35) !important"},
     ".ag-root-wrapper": {"border": "none !important"},
-    ".ag-cell, .ag-header-cell-text": {"font-size": "12px !important"},   # compact
 }
 
 
@@ -390,13 +389,11 @@ def render_table(df, levels, highlight, key):
     opts["pinnedTopRowData"] = pinned
     opts["getRowStyle"] = row_style
     opts["suppressMovableColumns"] = True
-    opts["rowHeight"] = 25          # compact rows
-    opts["headerHeight"] = 28
 
-    n = len(main_df) + len(pinned)   # header + all rows, tight (no wasted space)
+    n = len(main_df) + len(pinned)
     AgGrid(main_df, gridOptions=opts, allow_unsafe_jscode=True, theme="streamlit",
            custom_css=AGGRID_CSS, fit_columns_on_grid_load=False, key=key,
-           height=min(n * 25 + 42, 1200))
+           height=min(n * 31 + 50, 1100))
 
 
 def group_label(group, grp):
