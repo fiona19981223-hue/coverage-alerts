@@ -2,9 +2,11 @@ name: Coverage alerts
 
 on:
   schedule:
-    # every 15 min, 00:00-08:45 UTC  (~08:00-16:45 Hong Kong time), Mon-Fri.
-    # NOTE: GitHub cron is best-effort and can be delayed several minutes under load.
-    - cron: "*/15 0-8 * * 1-5"
+    # every 15 min, 24/7 — catches outsized moves across every market our book spans
+    # (HK/JP/CN/KR/TW/SEA closes + US-listed ADRs that trade overnight HKT).
+    # De-dupe in alerts.py = one alert per move, so off-hours/weekend runs are harmless.
+    # NOTE: GitHub cron is best-effort and can be delayed/dropped under load.
+    - cron: "*/15 * * * *"
   workflow_dispatch:        # adds a manual "Run workflow" button (also used for --seed)
     inputs:
       mode:

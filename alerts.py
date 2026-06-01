@@ -129,9 +129,9 @@ def main():
         return
 
     seed = "--seed" in sys.argv   # record current movers WITHOUT sending (clean first run)
-    if not seed and TODAY.dayofweek >= 5:
-        print("Weekend — markets closed, skipping.")
-        return
+    # No day/hours gate — runs 24/7 so moves in ANY market are caught, including US-listed
+    # ADRs (KWEB/BABA/JD/PDD/...) that trade overnight HKT, outside Asian hours. De-dupe by
+    # (ticker|period|bar-date) means one alert per move, so closed-market runs send nothing.
 
     wl = pd.read_csv(WATCHLIST, dtype=str, encoding="utf-8-sig").fillna("")
     tickers = wl["ticker"].tolist()
