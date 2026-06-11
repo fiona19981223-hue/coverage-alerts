@@ -4,4 +4,3 @@ streamlit-sortables
 streamlit-aggrid
 yfinance
 pandas
-akshare

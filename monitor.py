@@ -39,13 +39,14 @@ COLS = ["Name", "Ticker", "CCY", "Price", "Mkt Cap $bn", "1M chart",
 PCT = ["1D %", "1W %", "1M %", "3M %", "1Yr %"]
 BENCH_GROUP = "Benchmarks"          # index/ETF rows: shown like stocks, excluded from Top/Worst metrics
 
-# Fundamentals view (valuation / growth / quality). LFY = last reported fiscal year;
-# FY1 = consensus current/next fiscal year. Growth cols are colored green/red by sign;
-# ROE / Margin are shown as plain % (a level, not a change).
-FUND_COLS = ["Name", "Ticker", "CCY", "Fwd P/E",
-             "Rev gr LFY %", "Rev gr FY1 %", "EPS gr LFY %", "EPS gr FY1 %", "ROE %", "Margin %"]
+# Fundamentals view (growth / quality), REPORTED FINANCIALS ONLY — LFY = last reported fiscal
+# year, from Yahoo's statement feed (works on the cloud). Forward consensus (Fwd P/E, FY1) was
+# scrapped: it came from quoteSummary, which cloud IPs can't reach, and this dashboard is
+# cloud-only — no half-empty columns. Growth cols colored by sign; ROE / Margin are levels.
+FUND_COLS = ["Name", "Ticker", "CCY",
+             "Rev gr LFY %", "EPS gr LFY %", "ROE %", "Margin %"]
 FUND_NUM = FUND_COLS[3:]                                   # numeric columns to simple-average
-FUND_GROWTH = ["Rev gr LFY %", "Rev gr FY1 %", "EPS gr LFY %", "EPS gr FY1 %"]
+FUND_GROWTH = ["Rev gr LFY %", "EPS gr LFY %"]
 FUND_LEVEL = ["ROE %", "Margin %"]
 FX_SYMS = {"HKD": "HKDUSD=X", "CNY": "CNYUSD=X", "JPY": "JPYUSD=X",
            "THB": "THBUSD=X", "IDR": "IDRUSD=X", "TWD": "TWDUSD=X",
@@ -250,42 +251,6 @@ def fetch_tw_spot() -> dict:
     return out
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
-def fetch_aks_forecast() -> dict:
-    """Consensus forecast EPS by calendar year for ALL China A-shares, in ONE bulk call
-    (Eastmoney via AkShare). Used to backfill forward EPS for A-shares where Yahoo has no
-    estimates (esp. STAR-board small caps). Best-effort: returns {} if AkShare is missing or
-    the China endpoint is unreachable (e.g. blocked from a non-CN cloud IP) — cells then blank.
-    Returns {6-digit code: {year:int -> forecast EPS}}."""
-    import re as _re
-    try:
-        import akshare as ak
-        df = ak.stock_profit_forecast_em()
-    except Exception:
-        return {}
-    if df is None or "代码" not in getattr(df, "columns", []):
-        return {}
-    year_cols = {}
-    for c in df.columns:
-        m = _re.match(r"(\d{4})预测每股收益", str(c))
-        if m:
-            year_cols[int(m.group(1))] = c
-    out = {}
-    for _, r in df.iterrows():
-        code = str(r["代码"]).zfill(6)
-        ys = {}
-        for y, c in year_cols.items():
-            try:
-                v = float(r[c])
-                if pd.notna(v):
-                    ys[y] = v
-            except Exception:
-                pass
-        if ys:
-            out[code] = ys
-    return out
-
-
 def _num(x):
     """Coerce to a finite float, else None (tolerates strings / NaN / inf from Yahoo)."""
     try:
@@ -307,39 +272,22 @@ def _clip(v, lo, hi):
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_fundamentals(tickers: tuple) -> dict:
-    """Per-name valuation / growth / quality (cached 6h). Cloud-robust: ROE, net margin and
-    last-FY growth come from the financial-statement feed (works from a cloud server); forward
-    P/E and forward estimates come from Yahoo's quoteSummary, which only works off-cloud
-    (locally) — on the cloud those stay None and A-share forwards are backfilled via AkShare.
+    """Per-name growth / quality from REPORTED FINANCIALS only (cached 6h): ROE, net margin and
+    last-FY growth via Yahoo's statement feed, which works from the cloud. (Forward consensus was
+    scrapped — quoteSummary is cloud-blocked and this dashboard is cloud-only.)
     Only fetched for the Fundamentals view. Every field best-effort -> None."""
     def one(t):
-        d = {"fwd_pe": None, "roe_pct": None, "margin_pct": None,
-             "rev_lfy_pct": None, "eps_lfy_pct": None, "rev_fy1_pct": None,
-             "eps_fy1_pct": None, "last_fy": None, "last_eps": None, "price": None}
+        d = {"roe_pct": None, "margin_pct": None, "rev_lfy_pct": None, "eps_lfy_pct": None}
         try:
             tk = yf.Ticker(t)
         except Exception:
             return t, d
-        try:                                              # price: chart endpoint (works from cloud)
-            d["price"] = _num(tk.fast_info["lastPrice"])
-        except Exception:
-            pass
-        try:                                              # quoteSummary: forward P/E (+ local fallbacks)
-            info = tk.get_info() or {}
-        except Exception:
-            info = {}
-        d["fwd_pe"] = _num(info.get("forwardPE"))
 
         # actuals & quality from the financial statements (timeseries feed — works from cloud)
         last_rev = last_ni = None
         try:
             iss = tk.income_stmt
             if iss is not None and getattr(iss, "shape", (0, 0))[1] >= 1:
-                try:
-                    d["last_fy"] = int(iss.columns[0].year)
-                except Exception:
-                    pass
-
                 def irow(*names):
                     for nm in names:
                         if nm in iss.index:
@@ -353,10 +301,8 @@ def fetch_fundamentals(tickers: tuple) -> dict:
                     if len(rev) >= 2 and _num(rev.iloc[1]) and _num(rev.iloc[1]) > 0:
                         d["rev_lfy_pct"] = (float(rev.iloc[0]) / float(rev.iloc[1]) - 1) * 100
                 eps = irow("Diluted EPS", "Basic EPS")
-                if eps is not None:
-                    d["last_eps"] = _num(eps.iloc[0])
-                    if len(eps) >= 2 and _num(eps.iloc[1]) and _num(eps.iloc[1]) > 0:
-                        d["eps_lfy_pct"] = (float(eps.iloc[0]) / float(eps.iloc[1]) - 1) * 100
+                if eps is not None and len(eps) >= 2 and _num(eps.iloc[1]) and _num(eps.iloc[1]) > 0:
+                    d["eps_lfy_pct"] = (float(eps.iloc[0]) / float(eps.iloc[1]) - 1) * 100
                 ni = irow("Net Income Common Stockholders", "Net Income")
                 last_ni = _num(ni.iloc[0]) if ni is not None else None
                 if last_ni is not None and last_rev and last_rev > 0:
@@ -379,33 +325,6 @@ def fetch_fundamentals(tickers: tuple) -> dict:
                     denom = (e0 + e1) / 2 if (e0 and e1 and e0 > 0 and e1 > 0) else e0
                     if denom and denom > 0:
                         d["roe_pct"] = last_ni / denom * 100
-        except Exception:
-            pass
-        if d["roe_pct"] is None:                          # fall back to Yahoo (works locally)
-            roe = _num(info.get("returnOnEquity")); d["roe_pct"] = roe * 100 if roe is not None else None
-        if d["margin_pct"] is None:
-            mg = _num(info.get("profitMargins")); d["margin_pct"] = mg * 100 if mg is not None else None
-
-        try:                                              # FY1 revenue growth (Yahoo estimates — local)
-            re_ = tk.revenue_estimate
-            if re_ is not None and "0y" in re_.index:
-                avg = _num(re_.loc["0y", "avg"]) if "avg" in re_.columns else None
-                grw = _num(re_.loc["0y", "growth"]) if "growth" in re_.columns else None
-                val = (avg / last_rev - 1) * 100 if (avg and last_rev and last_rev > 0) else (
-                    grw * 100 if grw is not None else None)
-                if val is not None and abs(val) <= 300:
-                    d["rev_fy1_pct"] = val
-        except Exception:
-            pass
-        try:                                              # FY1 EPS growth (Yahoo estimates — local)
-            ee = tk.earnings_estimate
-            if ee is not None and "0y" in ee.index:
-                grw = _num(ee.loc["0y", "growth"]) if "growth" in ee.columns else None
-                avg = _num(ee.loc["0y", "avg"]) if "avg" in ee.columns else None
-                val = grw * 100 if grw is not None else (
-                    (avg / d["last_eps"] - 1) * 100 if (avg and d["last_eps"] and d["last_eps"] > 0) else None)
-                if val is not None and abs(val) <= 1000:
-                    d["eps_fy1_pct"] = val
         except Exception:
             pass
         return t, d
@@ -466,46 +385,23 @@ def agg_row(rows, name):
     return d
 
 
-def fund_row(meta, f, aks):
-    """One Fundamentals-view row. ROE/Margin/LFY growth come from the statement feed
-    (cloud-robust). For A-shares where Yahoo's forward estimates are unavailable (e.g. on a
-    cloud server), forward EPS growth and forward P/E are filled from AkShare's consensus
-    forecast EPS: EPS-FY1 = FY1 forecast / last actual − 1, Fwd P/E = price / FY1 forecast."""
-    t = meta["ticker"]
-    fwd_pe, eps_fy1 = f.get("fwd_pe"), f.get("eps_fy1_pct")
-    if t.upper().endswith((".SS", ".SZ")) and (eps_fy1 is None or fwd_pe is None):
-        fc = aks.get(t.split(".")[0].zfill(6), {})
-        last_fy, last_eps, price = f.get("last_fy"), f.get("last_eps"), f.get("price")
-        fwd_eps = (fc.get(last_fy + 1) or fc.get(last_fy)) if (fc and last_fy) else None
-        if eps_fy1 is None and fwd_eps is not None and last_eps and last_eps > 0:
-            v = (fwd_eps / last_eps - 1) * 100
-            if abs(v) <= 1000:
-                eps_fy1 = v
-        if fwd_pe is None and fwd_eps and price and fwd_eps > 0:
-            pe = price / fwd_eps
-            if 0 < pe <= 300:
-                fwd_pe = pe
+def fund_row(meta, f):
+    """One Fundamentals-view row — reported financials only (statement feed, cloud-robust)."""
     return {
         "Group": meta["group"], "Sub-group": meta["subgroup"], "Name": meta["name"],
-        "Ticker": t, "CCY": meta["currency"],
-        "Fwd P/E": _clip(fwd_pe, 0.01, 300),
+        "Ticker": meta["ticker"], "CCY": meta["currency"],
         "Rev gr LFY %": _clip(f.get("rev_lfy_pct"), -300, 300),
-        "Rev gr FY1 %": _clip(f.get("rev_fy1_pct"), -300, 300),
         "EPS gr LFY %": _clip(f.get("eps_lfy_pct"), -300, 300),
-        "EPS gr FY1 %": _clip(eps_fy1, -300, 300),
         "ROE %": _clip(f.get("roe_pct"), -150, 150),
         "Margin %": _clip(f.get("margin_pct"), -100, 100),
     }
 
 
 def fund_agg_row(rows, name):
-    """Simple (equal-weight) average of each fundamentals column. For Fwd P/E, non-positive /
-    absurd values are excluded so a single loss-maker doesn't poison the group average."""
+    """Simple (equal-weight) average of each fundamentals column."""
     d = {"Name": name, "Ticker": "", "CCY": ""}
     for c in FUND_NUM:
         vals = [r[c] for r in rows if r.get(c) is not None and pd.notna(r[c])]
-        if c == "Fwd P/E":
-            vals = [v for v in vals if 0 < v <= 300]
         d[c] = sum(vals) / len(vals) if vals else float("nan")
     return d
 
@@ -634,7 +530,6 @@ def render_table(df, levels, key, cols=COLS, highlight=True):
 
     pct_fmt = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':(p.value>=0?'+':'')+Number(p.value).toFixed(1)+'%';}")
     lvl_fmt = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':Number(p.value).toFixed(1)+'%';}")
-    pe_fmt = JsCode("function(p){var v=p.value;return (v==null||isNaN(v)||v<=0||v>300)?'—':Number(v).toFixed(1);}")
     num2 = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':Number(p.value).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}")
     num1 = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':Number(p.value).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});}")
     # inline SVG sparkline from the row's CSV string of closes (community AgGrid — no enterprise dep).
@@ -695,8 +590,6 @@ def render_table(df, levels, key, cols=COLS, highlight=True):
         if c in cols:
             gb.configure_column(c, type=["numericColumn"], valueFormatter=pct_fmt,
                                 cellStyle=pct_style(MOVE_THRESH[c]), width=82)
-    if "Fwd P/E" in cols:
-        gb.configure_column("Fwd P/E", type=["numericColumn"], valueFormatter=pe_fmt, width=90)
     for c in FUND_GROWTH:
         if c in cols:
             gb.configure_column(c, type=["numericColumn"], valueFormatter=pct_fmt,
@@ -746,10 +639,8 @@ def fund_group_label(group, grp):
         s = f"{v:+.1f}%"
         return f":green[{s}]" if v > 0 else (f":red[{s}]" if v < 0 else s)
 
-    pe = ga["Fwd P/E"]
-    pe_s = "—" if pd.isna(pe) else f"{pe:.1f}x"
-    return (f"**▸ {group}**  ({len(grp)})   Fwd P/E {pe_s} · Rev FY1 {c(ga['Rev gr FY1 %'])} · "
-            f"EPS FY1 {c(ga['EPS gr FY1 %'])} · ROE {c(ga['ROE %'])} · Margin {c(ga['Margin %'])}")
+    return (f"**▸ {group}**  ({len(grp)})   Rev LFY {c(ga['Rev gr LFY %'])} · "
+            f"EPS LFY {c(ga['EPS gr LFY %'])} · ROE {c(ga['ROE %'])} · Margin {c(ga['Margin %'])}")
 
 
 def detail_panel(ticker, wl_all, hist):
@@ -862,7 +753,7 @@ def edit_watchlist_ui(wl_all):
             st.error(f"Save failed: {e}")
         else:
             fetch_history.clear(); fetch_fx.clear(); fetch_mktcap.clear()
-            fetch_fundamentals.clear(); fetch_aks_forecast.clear()
+            fetch_fundamentals.clear()
             where = "GitHub (cloud — alerts will follow)" if gh_enabled() else WATCHLIST.name
             st.success(f"Saved {len(df)} names to {where}. "
                        "Toggle off ✏️ Edit watchlist to view the live monitor.")
@@ -916,7 +807,7 @@ def reorder_watchlist_ui(wl_all):
             st.error(f"Save failed: {e}")
         else:
             fetch_history.clear(); fetch_fx.clear(); fetch_mktcap.clear()
-            fetch_fundamentals.clear(); fetch_aks_forecast.clear()
+            fetch_fundamentals.clear()
             where = "GitHub (cloud — alerts will follow)" if gh_enabled() else WATCHLIST.name
             st.success(f"New order saved to {where}. Toggle off ↕ Reorder to view the monitor.")
 
@@ -938,7 +829,7 @@ with st.sidebar:
     if not (edit_mode or reorder_mode):
         picked = st.multiselect("Groups", all_groups, default=all_groups)
         view = st.radio("View", ["Returns", "Fundamentals"], index=0,
-                        help="Returns = price moves 1D–1Yr.  Fundamentals = valuation, growth & quality (consensus).")
+                        help="Returns = price moves 1D–1Yr.  Fundamentals = reported growth & quality (LFY, ROE, margin).")
         layout = st.radio("Layout", ["Collapsible groups", "Single table"], index=0,
                           help="Collapsible: click a group header to expand/collapse its names.")
         expand_all = show_groups = True
@@ -954,8 +845,7 @@ with st.sidebar:
             sort_opts = ["Group order", "1D %", "1W %", "1M %", "3M %", "1Yr %", "Price", "Mkt Cap $bn", "Name"]
         else:
             highlight_moves = False
-            sort_opts = ["Group order", "Fwd P/E", "Rev gr FY1 %", "EPS gr FY1 %",
-                         "Rev gr LFY %", "EPS gr LFY %", "ROE %", "Margin %", "Name"]
+            sort_opts = ["Group order", "Rev gr LFY %", "EPS gr LFY %", "ROE %", "Margin %", "Name"]
         sort_by = st.selectbox("Sort names by", sort_opts, index=0,
                                help="Reorders names within each group / sub-group.")
         sort_desc = st.toggle("High → low", value=True, help="Off = low → high (A→Z for Name).")
@@ -969,7 +859,7 @@ with st.sidebar:
         st.divider()
         if st.button("🔄 Refresh now"):
             fetch_history.clear(); fetch_fx.clear(); fetch_mktcap.clear()
-            fetch_fundamentals.clear(); fetch_aks_forecast.clear()
+            fetch_fundamentals.clear()
         st.caption(f"{len(wl_all)} names from {WATCHLIST.name}. Market cap & FX cached ~30 min.")
 
 if edit_mode:
@@ -989,19 +879,18 @@ tickers = tuple(wl["ticker"])
 failures, foot, hist = [], None, None
 
 if view == "Fundamentals":
-    with st.spinner("Fetching fundamentals & consensus… (first load ~30–60s; cached 6h)"):
+    with st.spinner("Fetching reported financials… (first load ~30–60s; cached 6h)"):
         funds = fetch_fundamentals(tickers)
-        aks = fetch_aks_forecast()
-    rows_all = [fund_row(r, funds.get(r["ticker"]) or {}, aks) for _, r in wl.iterrows()]
+    rows_all = [fund_row(r, funds.get(r["ticker"]) or {}) for _, r in wl.iterrows()]
     cols_act, agg_fn, label_fn = FUND_COLS, fund_agg_row, fund_group_label
     fdf = pd.DataFrame(rows_all)
-    pe = fdf["Fwd P/E"]; pe_med = pe[(pe > 0) & (pe <= 300)].median()
+    roe_med = fdf["ROE %"].median(); mg_med = fdf["Margin %"].median()
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Names", len(fdf))
-    c2.metric("Median Fwd P/E", "—" if pd.isna(pe_med) else f"{pe_med:.1f}x")
-    c3.metric("FY1 EPS consensus", f"{int(fdf['EPS gr FY1 %'].notna().sum())} / {len(fdf)}")
-    c4.metric("A-share backfill", "on" if aks else "off",
-              help="AkShare/Eastmoney consensus used to fill A-share forward EPS where Yahoo is blank.")
+    c2.metric("Median ROE", "—" if pd.isna(roe_med) else f"{roe_med:.1f}%")
+    c3.metric("Median net margin", "—" if pd.isna(mg_med) else f"{mg_med:.1f}%")
+    c4.metric("With financials", f"{int(fdf['Rev gr LFY %'].notna().sum())} / {len(fdf)}",
+              help="Names whose reported statements Yahoo carries (indices and brand-new listings have none).")
 else:
     with st.spinner("Fetching prices, FX and market caps… (first load ~10–20s)"):
         hist = fetch_history(tickers)
@@ -1079,8 +968,7 @@ with st.sidebar:                                        # export the CURRENT vie
 
 if view == "Fundamentals":
     st.caption("Fundamentals · **ROE, Net margin & LFY growth** computed from reported financials (works on the "
-               "cloud) · **Fwd P/E & FY1 growth** = forward consensus from Yahoo (populates on local runs; "
-               "A-shares filled via AkShare/Eastmoney on the cloud) · group/sub-group rows = simple average · cached ~6h")
+               "cloud) · group/sub-group rows = simple average · cached ~6h")
 
 st.caption(f"Last updated **{datetime.now():%H:%M:%S}**  ·  "
            + (f"🔄 auto-refresh every {interval}s · refresh #{tick}" if auto else "⏸ auto-refresh OFF")
