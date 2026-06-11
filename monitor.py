@@ -669,15 +669,20 @@ def detail_panel(ticker, wl_all, hist):
                     f"{rng} {arrow} **{chg:+.1f}%**  ·  {len(s2)} bars")
         # Altair with zero=False — st.line_chart anchors Y at 0, which flattens a 24,000-point
         # index into an invisible wiggle. Scale to the data range like any price chart.
+        # X-axis format pinned per range — Altair's auto-formatter labels short spans with
+        # WEEKDAYS (Mon/Tue/…), which is useless on a 1M–6M price chart.
         import altair as alt
         cdf = s2.rename("Close").reset_index()
         cdf.columns = ["Date", "Close"]
         line_col = "#16a34a" if chg >= 0 else "#dc2626"
+        x_fmt = "%d %b" if rng in ("1M", "3M") else "%b %y"      # 12 Jun · Jun 26
         ch = (alt.Chart(cdf).mark_line(color=line_col, strokeWidth=1.8)
-              .encode(x=alt.X("Date:T", axis=alt.Axis(title=None)),
+              .encode(x=alt.X("Date:T", axis=alt.Axis(title=None, format=x_fmt,
+                                                      tickCount=6, labelAngle=0)),
                       y=alt.Y("Close:Q", scale=alt.Scale(zero=False),
                               axis=alt.Axis(title=None, format="~s")),
-                      tooltip=[alt.Tooltip("Date:T"), alt.Tooltip("Close:Q", format=",.2f")])
+                      tooltip=[alt.Tooltip("Date:T", format="%d %b %Y"),
+                               alt.Tooltip("Close:Q", format=",.2f")])
               .properties(height=260))
         st.altair_chart(ch, use_container_width=True)
 
