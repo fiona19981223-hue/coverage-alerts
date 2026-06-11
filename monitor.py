@@ -35,7 +35,7 @@ except ImportError:
 
 WATCHLIST = Path(__file__).with_name("watchlist.csv")
 COLS = ["Name", "Ticker", "CCY", "Price", "Mkt Cap $bn", "1M chart",
-        "1D %", "1W %", "1M %", "3M %", "1Yr %", "Earn"]
+        "1D %", "1W %", "1M %", "3M %", "1Yr %"]
 PCT = ["1D %", "1W %", "1M %", "3M %", "1Yr %"]
 BENCH_GROUP = "Benchmarks"          # index/ETF rows: shown like stocks, excluded from Top/Worst metrics
 
@@ -202,31 +202,6 @@ def fetch_mktcap(tickers: tuple) -> dict:
     with ThreadPoolExecutor(max_workers=8) as ex:
         for t, mc in ex.map(one, tickers):
             out[t] = mc
-    return out
-
-
-@st.cache_data(ttl=43200, show_spinner=False)
-def fetch_earnings(tickers: tuple) -> dict:
-    """Next earnings date per ticker -> 'MM-DD' ('📅 MM-DD' if within 7 days), cached 12h.
-    Uses Yahoo's calendar (quoteSummary) — populates on LOCAL runs; on the cloud those calls
-    fail and cells stay blank (same trade-off as Fwd P/E). Best-effort everywhere."""
-    def one(t):
-        try:
-            cal = yf.Ticker(t).calendar
-            dates = cal.get("Earnings Date") if isinstance(cal, dict) else None
-            if not dates:
-                return t, ""
-            d = pd.Timestamp(dates[0]).normalize()
-            if d < TODAY:                      # stale past print -> not useful
-                return t, ""
-            tag = f"{d:%m-%d}"
-            return t, (f"📅 {tag}" if (d - TODAY).days <= 7 else tag)
-        except Exception:
-            return t, ""
-    out = {}
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        for t, v in ex.map(one, tickers):
-            out[t] = v
     return out
 
 
@@ -460,7 +435,7 @@ def ret_asof(s, last_px, target_date):
     return pct(last_px, float(after.iloc[0])) if len(after) else None
 
 
-def stock_row(meta, s, fx, mcap_native, earn=None):
+def stock_row(meta, s, fx, mcap_native):
     n = len(s)
     last = float(s.iloc[-1])
     idx = s.index
@@ -478,13 +453,11 @@ def stock_row(meta, s, fx, mcap_native, earn=None):
         "1M %": ret_asof(s, last, ldn - pd.DateOffset(months=1)),       # trailing 1M from last close
         "3M %": ret_asof(s, last, ldn - pd.DateOffset(months=3)),       # trailing 3M from last close
         "1Yr %": ret_asof(s, last, TODAY - pd.Timedelta(weeks=52)),     # 52-week change (Yahoo stat)
-        "Earn": earn or "",                                              # next earnings (MM-DD; 📅 = <7d)
     }
 
 
 def agg_row(rows, name):
-    d = {"Name": name, "Ticker": "", "CCY": "", "Price": float("nan"),
-         "1M chart": None, "Earn": ""}
+    d = {"Name": name, "Ticker": "", "CCY": "", "Price": float("nan"), "1M chart": None}
     mc = [r["Mkt Cap $bn"] for r in rows if pd.notna(r["Mkt Cap $bn"])]
     d["Mkt Cap $bn"] = sum(mc) if mc else float("nan")
     for c in PCT:
@@ -695,7 +668,7 @@ def render_table(df, levels, key, cols=COLS, highlight=True):
         "var col=null;try{col=p.api.getColumn?p.api.getColumn('Ticker'):null;}catch(e){}"
         "if(!col){try{col=p.columnApi.getColumn('Ticker');}catch(e){}}"
         "if(!col)return; if(col.isVisible()===!small)return;"
-        "var hide=['Ticker','CCY','Mkt Cap $bn','1M chart','Earn'];"
+        "var hide=['Ticker','CCY','Mkt Cap $bn','1M chart'];"
         "try{p.api.setColumnsVisible(hide,!small);}catch(e){try{p.columnApi.setColumnsVisible(hide,!small);}catch(_){}}}")
     hl = "true" if highlight else "false"
 
@@ -718,8 +691,6 @@ def render_table(df, levels, key, cols=COLS, highlight=True):
         gb.configure_column("Mkt Cap $bn", type=["numericColumn"], valueFormatter=num1, width=104)
     if "1M chart" in cols:
         gb.configure_column("1M chart", cellRenderer=spark, sortable=False, width=104)
-    if "Earn" in cols:
-        gb.configure_column("Earn", width=88, sortable=True)
     for c in PCT:
         if c in cols:
             gb.configure_column(c, type=["numericColumn"], valueFormatter=pct_fmt,
@@ -805,7 +776,19 @@ def detail_panel(ticker, wl_all, hist):
         arrow = "🟢" if chg >= 0 else "🔴"
         st.markdown(f"**📈 {name}** · `{ticker}` · last **{last:,.2f}** · "
                     f"{rng} {arrow} **{chg:+.1f}%**  ·  {len(s2)} bars")
-        st.line_chart(s2.rename("Close"), height=260)
+        # Altair with zero=False — st.line_chart anchors Y at 0, which flattens a 24,000-point
+        # index into an invisible wiggle. Scale to the data range like any price chart.
+        import altair as alt
+        cdf = s2.rename("Close").reset_index()
+        cdf.columns = ["Date", "Close"]
+        line_col = "#16a34a" if chg >= 0 else "#dc2626"
+        ch = (alt.Chart(cdf).mark_line(color=line_col, strokeWidth=1.8)
+              .encode(x=alt.X("Date:T", axis=alt.Axis(title=None)),
+                      y=alt.Y("Close:Q", scale=alt.Scale(zero=False),
+                              axis=alt.Axis(title=None, format="~s")),
+                      tooltip=[alt.Tooltip("Date:T"), alt.Tooltip("Close:Q", format=",.2f")])
+              .properties(height=260))
+        st.altair_chart(ch, use_container_width=True)
 
 
 def ccy_from_yahoo(t: str) -> str:
@@ -968,13 +951,9 @@ with st.sidebar:
         if view == "Returns":
             highlight_moves = st.toggle("Highlight big moves", value=True,
                                         help="Shade a cell green/red for outsized moves: 1D≥5% · 1W≥10% · 1M≥20% · 3M≥30% · 1Yr≥50%.")
-            show_earn = st.toggle("📅 Earnings dates", value=not gh_enabled(),
-                                  help="Next-earnings column (Yahoo calendar — populates on local runs; "
-                                       "usually blank on the cloud). First fetch ~10s, then cached 12h.")
             sort_opts = ["Group order", "1D %", "1W %", "1M %", "3M %", "1Yr %", "Price", "Mkt Cap $bn", "Name"]
         else:
             highlight_moves = False
-            show_earn = False
             sort_opts = ["Group order", "Fwd P/E", "Rev gr FY1 %", "EPS gr FY1 %",
                          "Rev gr LFY %", "EPS gr LFY %", "ROE %", "Margin %", "Name"]
         sort_by = st.selectbox("Sort names by", sort_opts, index=0,
@@ -1028,7 +1007,6 @@ else:
         hist = fetch_history(tickers)
         fx = fetch_fx()
         mcaps = fetch_mktcap(tickers)
-        earn = fetch_earnings(tickers) if show_earn else {}
     stock_rows, tw_patched = [], []
     for _, r in wl.iterrows():
         s = hist.get(r["ticker"])
@@ -1042,12 +1020,12 @@ else:
                     "Ticker": r["ticker"], "CCY": r["currency"], "Price": last,
                     "Mkt Cap $bn": float("nan"), "1M chart": None,
                     "1D %": pct(last, prev), "1W %": None, "1M %": None, "3M %": None,
-                    "1Yr %": None, "Earn": ""})
+                    "1Yr %": None})
                 tw_patched.append(f"{r['name']} (TWSE/TPEx close {asof})")
                 continue
             failures.append(f"{r['name']} ({r['ticker']})")
             continue
-        stock_rows.append(stock_row(r, s, fx, mcaps.get(r["ticker"]), earn.get(r["ticker"], "")))
+        stock_rows.append(stock_row(r, s, fx, mcaps.get(r["ticker"])))
     if not stock_rows:
         st.error("No data returned. Yahoo may be rate-limiting — hit Refresh in a moment.")
         st.stop()
