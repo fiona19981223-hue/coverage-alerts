@@ -1,11 +1,11 @@
 group,subgroup,name,ticker,bbg,currency,alert_thr
 Benchmarks,,S&P 500,^GSPC,SPX Index,USD,3
 Benchmarks,,Hang Seng,^HSI,HSI Index,HKD,3
-Benchmarks,,HS Tech (3033 ETF),3033.HK,3033 HK,HKD,3
 Benchmarks,,CSI 300,000300.SS,SHSZ300 Index,CNY,3
 Benchmarks,,Nikkei 225,^N225,NKY Index,JPY,3
 Benchmarks,,TAIEX,^TWII,TWSE Index,TWD,3
 China Internet,,KWEB,KWEB,KWEB US,USD,
+China Internet,,HS Tech (3033 ETF),3033.HK,3033 HK,HKD,3
 China Internet,,Tencent,0700.HK,700 HK,HKD,
 China Internet,,Alibaba,9988.HK,9988 HK,HKD,
 China Internet,,Baidu,9888.HK,9888 HK,HKD,
