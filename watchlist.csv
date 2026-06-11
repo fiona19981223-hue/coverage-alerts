@@ -1,10 +1,10 @@
 group,subgroup,name,ticker,bbg,currency,alert_thr
+Benchmarks,,S&P 500,^GSPC,SPX Index,USD,3
 Benchmarks,,Hang Seng,^HSI,HSI Index,HKD,3
 Benchmarks,,HS Tech (3033 ETF),3033.HK,3033 HK,HKD,3
 Benchmarks,,CSI 300,000300.SS,SHSZ300 Index,CNY,3
 Benchmarks,,Nikkei 225,^N225,NKY Index,JPY,3
 Benchmarks,,TAIEX,^TWII,TWSE Index,TWD,3
-Benchmarks,,S&P 500,^GSPC,SPX Index,USD,3
 China Internet,,KWEB,KWEB,KWEB US,USD,
 China Internet,,Tencent,0700.HK,700 HK,HKD,
 China Internet,,Alibaba,9988.HK,9988 HK,HKD,
@@ -71,5 +71,5 @@ Special sits,,CP ALL,CPALL.BK,CPALL TB,THB,
 Special sits,,CP Axtra,CPAXT.BK,CPAXT TB,THB,
 Special sits,,Makemytrip,MMYT,MMYT US,USD,
 Other ALC names,BE supply chain,Acbel,6282.TW,6282 TT,TWD,
-Other ALC names,Semis,FOCI,3363.TWO,3363 TT,TWD,
 Other ALC names,BE supply chain,Kaori,8996.TW,8996 TT,TWD,
+Other ALC names,Semis,FOCI,3363.TWO,3363 TT,TWD,
