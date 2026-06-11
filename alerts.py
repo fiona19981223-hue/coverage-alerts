@@ -9,7 +9,12 @@ re-alerts on weekends/holidays (no new bar => no new alert).
 Setup:
   1. Create a Teams webhook (see README_ALERTS.txt) and paste its URL into alerts_config.json
   2. Test:  python alerts.py --test     (sends a hello message to the channel)
-  3. Live:  python alerts.py            (run on a schedule via setup_alerts_schedule.ps1)
+  3. Dry:   python alerts.py --dry      (prints what WOULD alert — no send, state untouched)
+  4. Live:  python alerts.py            (run on a schedule via setup_alerts_schedule.ps1)
+
+Per-name thresholds: optional watchlist column `alert_thr` overrides the 1D default for that name
+(e.g. 3 for Benchmarks indices, 8 for habitually volatile small caps). Optional `dashboard_url`
+(env DASHBOARD_URL or config) appends a dashboard link to each alert.
 """
 import json
 import os
@@ -22,6 +27,11 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+try:                                   # Windows console is cp1252 — --dry prints 🟢/🔴 safely
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 BASE = Path(__file__).parent
 WATCHLIST = BASE / "watchlist.csv"
 CONFIG = BASE / "alerts_config.json"
@@ -32,7 +42,7 @@ MOVE_THRESH = {"1D": 5}   # alert on 1D moves only. To also alert on longer hori
 # re-add e.g. "1W": 10, "1M": 20, "3M": 30, "1Yr": 50 (the dashboard still shows all of them).
 
 
-def load_config():
+def load_config(require_webhook=True):
     # Webhook URL: env var first (cloud / GitHub Actions secret), then local config file.
     cfg = {}
     if CONFIG.exists():
@@ -41,9 +51,11 @@ def load_config():
         except Exception:
             cfg = {}
     url = os.environ.get("TEAMS_WEBHOOK_URL", "").strip() or cfg.get("teams_webhook_url", "")
-    if not url.startswith("http"):
+    if not url.startswith("http") and require_webhook:
         sys.exit("No webhook URL — set env TEAMS_WEBHOOK_URL or 'teams_webhook_url' in alerts_config.json.")
     cfg["teams_webhook_url"] = url
+    # optional: a link back to the dashboard, appended to each alert (env or config; not a secret)
+    cfg["dashboard_url"] = os.environ.get("DASHBOARD_URL", "").strip() or cfg.get("dashboard_url", "")
     return cfg
 
 
@@ -109,8 +121,10 @@ def send_teams(url, title, lines):
 
 
 def main():
-    cfg = load_config()
+    dry = "--dry" in sys.argv            # compute + print, never send, never touch state
+    cfg = load_config(require_webhook=not dry)
     url = cfg["teams_webhook_url"]
+    dash = cfg.get("dashboard_url", "")
     thr = {**MOVE_THRESH, **cfg.get("thresholds", {})}
 
     if "--test" in sys.argv:
@@ -154,22 +168,39 @@ def main():
         if s is None or len(s) < 2:
             continue
         m, bar = moves(s)
+        thr_row = dict(thr)                                 # per-name 1D override from watchlist alert_thr
+        try:                                                # (blank/invalid -> default; e.g. 3 for indices,
+            ov = float(str(r.get("alert_thr", "")).strip())  # 8 for habitually volatile names)
+            if ov > 0:
+                thr_row["1D"] = ov
+        except (TypeError, ValueError):
+            pass
         hits = [(p, v) for p, v in m.items()
-                if p in thr and v is not None and abs(v) >= thr[p] and f"{t}|{p}|{bar}" not in state]
+                if p in thr_row and v is not None and abs(v) >= thr_row[p] and f"{t}|{p}|{bar}" not in state]
         if not hits:
             continue
         last, prev = float(s.iloc[-1]), float(s.iloc[-2])   # prev = prior close (the 1D reference)
         bbg = str(r.get("bbg", "")).strip()
-        label = f"{bbg} Equity" if bbg else t               # e.g. "9866 HK Equity"; fallback = Yahoo ticker
+        # "9866 HK Equity"; indices keep their own suffix ("HSI Index", not "HSI Index Equity")
+        label = bbg if bbg.endswith("Index") else (f"{bbg} Equity" if bbg else t)
         for p, v in hits:
             key = f"{t}|{p}|{bar}"
             new_keys.append(key)
             dot = "🟢" if v > 0 else ("🔴" if v < 0 else "⚪")
-            movers.append((key, [
+            lines = [
                 f"{dot} Ticker: {label} ({r['name']})",
                 f"Stock: {v:+.2f}%",
                 f"Price: {last:,.2f} (prev {prev:,.2f})",
-            ]))
+            ]
+            if dash:
+                lines.append(f'<a href="{dash}">📊 Dashboard</a>')
+            movers.append((key, lines))
+
+    if dry:
+        print(f"[dry] {len(movers)} alert(s) would send (nothing sent, state untouched):")
+        for key, lines in movers:
+            print("  " + key + "  ->  " + " | ".join(lines))
+        return
 
     if seed:
         save_state(state | set(new_keys))

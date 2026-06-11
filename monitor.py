@@ -34,9 +34,10 @@ except ImportError:
     st_autorefresh = None
 
 WATCHLIST = Path(__file__).with_name("watchlist.csv")
-COLS = ["Name", "Ticker", "CCY", "Price", "Mkt Cap $bn",
-        "1D %", "1W %", "1M %", "3M %", "1Yr %"]
+COLS = ["Name", "Ticker", "CCY", "Price", "Mkt Cap $bn", "1M chart",
+        "1D %", "1W %", "1M %", "3M %", "1Yr %", "Earn"]
 PCT = ["1D %", "1W %", "1M %", "3M %", "1Yr %"]
+BENCH_GROUP = "Benchmarks"          # index/ETF rows: shown like stocks, excluded from Top/Worst metrics
 
 # Fundamentals view (valuation / growth / quality). LFY = last reported fiscal year;
 # FY1 = consensus current/next fiscal year. Growth cols are colored green/red by sign;
@@ -201,6 +202,76 @@ def fetch_mktcap(tickers: tuple) -> dict:
     with ThreadPoolExecutor(max_workers=8) as ex:
         for t, mc in ex.map(one, tickers):
             out[t] = mc
+    return out
+
+
+@st.cache_data(ttl=43200, show_spinner=False)
+def fetch_earnings(tickers: tuple) -> dict:
+    """Next earnings date per ticker -> 'MM-DD' ('📅 MM-DD' if within 7 days), cached 12h.
+    Uses Yahoo's calendar (quoteSummary) — populates on LOCAL runs; on the cloud those calls
+    fail and cells stay blank (same trade-off as Fwd P/E). Best-effort everywhere."""
+    def one(t):
+        try:
+            cal = yf.Ticker(t).calendar
+            dates = cal.get("Earnings Date") if isinstance(cal, dict) else None
+            if not dates:
+                return t, ""
+            d = pd.Timestamp(dates[0]).normalize()
+            if d < TODAY:                      # stale past print -> not useful
+                return t, ""
+            tag = f"{d:%m-%d}"
+            return t, (f"📅 {tag}" if (d - TODAY).days <= 7 else tag)
+        except Exception:
+            return t, ""
+    out = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for t, v in ex.map(one, tickers):
+            out[t] = v
+    return out
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_tw_spot() -> dict:
+    """Fallback quotes for Taiwan names Yahoo drops: official TWSE (.TW) + TPEx (.TWO) daily
+    files — last completed session's close + change for EVERY listed name, no key needed.
+    Returns {code: (close, prev_close, 'YYYY-MM-DD')}. Best-effort: {} on any failure."""
+    out = {}
+
+    def _f(x):
+        try:
+            v = float(str(x).replace(",", "").strip())
+            return v
+        except (TypeError, ValueError):
+            return None
+
+    def _rocdate(s):                            # '1150610' (ROC) -> '2026-06-10'
+        try:
+            s = str(s).strip()
+            return f"{int(s[:-4]) + 1911}-{s[-4:-2]}-{s[-2:]}"
+        except Exception:
+            return ""
+
+    def _pull(url, code_key, close_key, chg_key):
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0",
+                                                   "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            rows = json.loads(r.read())
+        for rec in rows:
+            close, chg = _f(rec.get(close_key)), _f(rec.get(chg_key))
+            if close is None or chg is None:
+                continue
+            out[str(rec.get(code_key, "")).strip()] = (close, close - chg, _rocdate(rec.get("Date")))
+
+    try:
+        _pull("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
+              "Code", "ClosingPrice", "Change")
+    except Exception:
+        pass
+    try:
+        _pull("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes",
+              "SecuritiesCompanyCode", "Close", "Change")
+    except Exception:
+        pass
     return out
 
 
@@ -389,7 +460,7 @@ def ret_asof(s, last_px, target_date):
     return pct(last_px, float(after.iloc[0])) if len(after) else None
 
 
-def stock_row(meta, s, fx, mcap_native):
+def stock_row(meta, s, fx, mcap_native, earn=None):
     n = len(s)
     last = float(s.iloc[-1])
     idx = s.index
@@ -401,16 +472,19 @@ def stock_row(meta, s, fx, mcap_native):
         "Group": meta["group"], "Sub-group": meta["subgroup"], "Name": meta["name"],
         "Ticker": meta["ticker"], "CCY": meta["currency"], "Price": last,
         "Mkt Cap $bn": mcap_usd,
+        "1M chart": ",".join(f"{float(x):.5g}" for x in s.iloc[-22:]),   # ~1M closes (CSV string -> sparkline)
         "1D %": pct(last, float(s.iloc[-2]) if n >= 2 else None),        # vs prior close
         "1W %": pct(last, float(s.iloc[-5]) if n >= 5 else None),        # Yahoo "5D" (5-bar window)
         "1M %": ret_asof(s, last, ldn - pd.DateOffset(months=1)),       # trailing 1M from last close
         "3M %": ret_asof(s, last, ldn - pd.DateOffset(months=3)),       # trailing 3M from last close
         "1Yr %": ret_asof(s, last, TODAY - pd.Timedelta(weeks=52)),     # 52-week change (Yahoo stat)
+        "Earn": earn or "",                                              # next earnings (MM-DD; 📅 = <7d)
     }
 
 
 def agg_row(rows, name):
-    d = {"Name": name, "Ticker": "", "CCY": "", "Price": float("nan")}
+    d = {"Name": name, "Ticker": "", "CCY": "", "Price": float("nan"),
+         "1M chart": None, "Earn": ""}
     mc = [r["Mkt Cap $bn"] for r in rows if pd.notna(r["Mkt Cap $bn"])]
     d["Mkt Cap $bn"] = sum(mc) if mc else float("nan")
     for c in PCT:
@@ -565,20 +639,23 @@ def style_block(df, levels, highlight=True):
 def render_table(df, levels, key, cols=COLS, highlight=True):
     """Interactive AgGrid (DOM-rendered → crisp on mobile, tap headers to sort, swipe to scroll).
     Aggregate rows (group/sub-group avgs) are PINNED on top so sorting the stocks doesn't jumble them.
-    `cols` selects which columns render, so the same grid serves the Returns and Fundamentals views."""
+    `cols` selects which columns render, so the same grid serves the Returns and Fundamentals views.
+    Columns FLEX to fill the container (fixed widths become minWidths). Clicking a stock row selects
+    it — the caller reads the returned ticker to open the 📈 detail panel. On narrow (phone) grids the
+    secondary columns auto-hide so Name + the moves stay on screen. Returns the selected ticker or None."""
     try:
         from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
     except ImportError:
-        st.dataframe(df, hide_index=True, width="stretch")
-        return
+        st.dataframe(df.drop(columns=["1M chart"], errors="ignore"), hide_index=True, width="stretch")
+        return None
 
     main, pinned = [], []
     for row, lvl in zip(df.to_dict("records"), levels):
         if lvl == 0:
             main.append(row)
         else:
-            r = {k: (None if pd.isna(v) else v) for k, v in row.items()}   # JSON-safe: NaN -> null
-            r["_lvl"] = lvl
+            r = {k: (None if (not isinstance(v, list) and pd.isna(v)) else v) for k, v in row.items()}
+            r["_lvl"] = lvl                                                # JSON-safe: NaN -> null
             pinned.append(r)
     main_df = pd.DataFrame(main if main else [], columns=cols)
 
@@ -587,11 +664,39 @@ def render_table(df, levels, key, cols=COLS, highlight=True):
     pe_fmt = JsCode("function(p){var v=p.value;return (v==null||isNaN(v)||v<=0||v>300)?'—':Number(v).toFixed(1);}")
     num2 = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':Number(p.value).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}")
     num1 = JsCode("function(p){return (p.value==null||isNaN(p.value))?'—':Number(p.value).toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});}")
+    # inline SVG sparkline from the row's CSV string of closes (community AgGrid — no enterprise dep).
+    # CSV string because st_aggrid stringifies list columns; a CLASS component (init/getGui) because
+    # this st_aggrid renders function-renderer returns through React, which rejects both HTML strings
+    # (escaped to text) and DOM elements (React error #31). AgGrid mounts class components directly.
+    spark = JsCode(
+        "class SparkRenderer {"
+        " init(p){this.eGui=document.createElement('span');var a=p.value;if(!a)return;"
+        "  if(typeof a==='string'){a=a.split(',').map(Number).filter(function(x){return !isNaN(x);});}"
+        "  if(!a.length||a.length<2)return;"
+        "  var w=92,h=26,mn=Math.min.apply(null,a),mx=Math.max.apply(null,a);var sp=(mx-mn)||1;"
+        "  var pts=a.map(function(v,i){return (i*(w-4)/(a.length-1)+2).toFixed(1)+','+((h-4)-((v-mn)*(h-8)/sp)+2).toFixed(1);}).join(' ');"
+        "  var col=(a[a.length-1]>=a[0])?'#16a34a':'#dc2626';"
+        "  this.eGui.innerHTML='<svg width=\"'+w+'\" height=\"'+h+'\" style=\"vertical-align:middle\">"
+        "<polyline points=\"'+pts+'\" fill=\"none\" stroke=\"'+col+'\" stroke-width=\"1.4\"/></svg>';}"
+        " getGui(){return this.eGui;}"
+        " refresh(){return false;}"
+        "}")
     row_style = JsCode("function(p){if(p.node.rowPinned){var l=p.data['_lvl'];"
                        "return l==2?{'fontWeight':'700','backgroundColor':'rgba(128,128,128,0.22)'}:"
                        "{'fontWeight':'600','backgroundColor':'rgba(128,128,128,0.11)'};}return null;}")
     sign_color = JsCode("function(p){var v=p.value;if(v==null||isNaN(v))return{'color':'#9ca3af'};"
                         "return{'color':v>0?'#16a34a':(v<0?'#dc2626':'#6b7280')};}")
+    # phones: keep Name + moves visible, drop the secondary columns. IDEMPOTENT — only acts when
+    # visibility actually flips (hiding columns resizes the grid and re-fires this event; acting
+    # unconditionally creates an infinite resize loop that hangs the renderer).
+    size_fit = JsCode(
+        "function(p){var w=p.clientWidth||(p.api&&p.api.getSizesForCurrentTheme?null:null);"
+        "if(!p.clientWidth)return; var small=p.clientWidth<540;"
+        "var col=null;try{col=p.api.getColumn?p.api.getColumn('Ticker'):null;}catch(e){}"
+        "if(!col){try{col=p.columnApi.getColumn('Ticker');}catch(e){}}"
+        "if(!col)return; if(col.isVisible()===!small)return;"
+        "var hide=['Ticker','CCY','Mkt Cap $bn','1M chart','Earn'];"
+        "try{p.api.setColumnsVisible(hide,!small);}catch(e){try{p.columnApi.setColumnsVisible(hide,!small);}catch(_){}}}")
     hl = "true" if highlight else "false"
 
     def pct_style(thr):
@@ -611,6 +716,10 @@ def render_table(df, levels, key, cols=COLS, highlight=True):
         gb.configure_column("Price", type=["numericColumn"], valueFormatter=num2, width=96)
     if "Mkt Cap $bn" in cols:
         gb.configure_column("Mkt Cap $bn", type=["numericColumn"], valueFormatter=num1, width=104)
+    if "1M chart" in cols:
+        gb.configure_column("1M chart", cellRenderer=spark, sortable=False, width=104)
+    if "Earn" in cols:
+        gb.configure_column("Earn", width=88, sortable=True)
     for c in PCT:
         if c in cols:
             gb.configure_column(c, type=["numericColumn"], valueFormatter=pct_fmt,
@@ -628,11 +737,16 @@ def render_table(df, levels, key, cols=COLS, highlight=True):
     opts["pinnedTopRowData"] = pinned
     opts["getRowStyle"] = row_style
     opts["suppressMovableColumns"] = True
+    opts["onGridSizeChanged"] = size_fit
+    opts["onFirstDataRendered"] = size_fit
 
     n = len(main_df) + len(pinned)
     AgGrid(main_df, gridOptions=opts, allow_unsafe_jscode=True, theme="streamlit",
            custom_css=AGGRID_CSS, fit_columns_on_grid_load=False, key=key,
            height=min(n * 31 + 50, 1100))
+    # NB: no update_on/selection feedback — wiring grid events to Streamlit reruns made the 15
+    # grids re-trigger the script in a loop. The 📈 detail chart is driven by the picker instead.
+    return None
 
 
 def group_label(group, grp):
@@ -667,6 +781,33 @@ def fund_group_label(group, grp):
             f"EPS FY1 {c(ga['EPS gr FY1 %'])} · ROE {c(ga['ROE %'])} · Margin {c(ga['Margin %'])}")
 
 
+def detail_panel(ticker, wl_all, hist):
+    """📈 Detail chart for the picked name, straight from the already-cached history
+    (no extra fetch for Returns view; Fundamentals view fetches just this one name)."""
+    s = (hist or {}).get(ticker)
+    if s is None:
+        s = fetch_history((ticker,)).get(ticker)
+    row = wl_all[wl_all["ticker"] == ticker]
+    name = row.iloc[0]["name"] if len(row) else ticker
+    with st.container(border=True):
+        if s is None or len(s) == 0:
+            st.markdown(f"**📈 {name}** · `{ticker}` — no price history available.")
+            return
+        rng = st.radio("Range", ["1M", "3M", "6M", "1Y", "2Y"], index=3, horizontal=True,
+                       key="detail_rng", label_visibility="collapsed")
+        off = {"1M": pd.DateOffset(months=1), "3M": pd.DateOffset(months=3),
+               "6M": pd.DateOffset(months=6), "1Y": pd.DateOffset(years=1),
+               "2Y": pd.DateOffset(years=2)}[rng]
+        idx = s.index.tz_localize(None) if s.index.tz is not None else s.index
+        s2 = s[idx >= (idx[-1] - off)]
+        last, first = float(s2.iloc[-1]), float(s2.iloc[0])
+        chg = (last / first - 1) * 100 if first else 0.0
+        arrow = "🟢" if chg >= 0 else "🔴"
+        st.markdown(f"**📈 {name}** · `{ticker}` · last **{last:,.2f}** · "
+                    f"{rng} {arrow} **{chg:+.1f}%**  ·  {len(s2)} bars")
+        st.line_chart(s2.rename("Close"), height=260)
+
+
 def ccy_from_yahoo(t: str) -> str:
     """Best-effort trading currency from a Yahoo symbol suffix."""
     t = (t or "").upper().strip()
@@ -689,8 +830,9 @@ def edit_watchlist_ui(wl_all):
     st.subheader("✏️ Edit watchlist")
     st.info("Add rows at the bottom, edit any cell, or select a row and press Delete to remove it. "
             "**Ticker must be Yahoo format** — e.g. `0700.HK`, `BABA`, `600588.SS`, `6702.T`, `CPALL.BK`. "
-            "Currency auto-fills on Save when blank. Auto-refresh is paused while editing.")
-    cols = ["group", "subgroup", "name", "ticker", "bbg", "currency"]
+            "Currency auto-fills on Save when blank; new tickers are validated against Yahoo on Save "
+            "(catches `.TW` vs `.TWO` slips). Auto-refresh is paused while editing.")
+    cols = ["group", "subgroup", "name", "ticker", "bbg", "currency", "alert_thr"]
     base = wl_all.reindex(columns=cols).reset_index(drop=True)
     edited = st.data_editor(
         base, num_rows="dynamic", width="stretch", key="wl_editor", height=560,
@@ -702,6 +844,8 @@ def edit_watchlist_ui(wl_all):
                                                   help="e.g. 0700.HK · BABA · 600588.SS · 6702.T · CPALL.BK"),
             "bbg": st.column_config.TextColumn("Bloomberg (optional)"),
             "currency": st.column_config.TextColumn("CCY", help="Auto-filled on Save if left blank"),
+            "alert_thr": st.column_config.TextColumn("Alert ±%", help="Per-name 1D Teams-alert threshold "
+                                                     "(blank = default 5; e.g. 8 for habitual movers, 3 for indices)"),
         },
     )
     if st.button("💾 Save changes", type="primary"):
@@ -710,6 +854,24 @@ def edit_watchlist_ui(wl_all):
             df[c] = df[c].fillna("").astype(str).str.strip()
         df = df[(df["ticker"] != "") & (df["name"] != "")]
         df["currency"] = [c or ccy_from_yahoo(t) for c, t in zip(df["currency"], df["ticker"])]
+        # validate tickers Yahoo has never seen in this list (a 3363.TW-vs-.TWO slip once cost a name)
+        new = sorted(set(df["ticker"]) - set(wl_all["ticker"].astype(str)))
+        if new and not st.session_state.get("wl_save_anyway"):
+            with st.spinner(f"Validating {len(new)} new/changed ticker(s) against Yahoo…"):
+                def probe(t):
+                    try:
+                        return t, len(yf.Ticker(t).history(period="5d", interval="1d")) > 0
+                    except Exception:
+                        return t, False
+                with ThreadPoolExecutor(max_workers=6) as ex:
+                    bad = [t for t, ok in ex.map(probe, new) if not ok]
+            if bad:
+                st.error("Yahoo has NO price data for: **" + ", ".join(bad) + "** — check the suffix "
+                         "(`.TW` main board vs `.TWO` TPEx · `.SS` Shanghai vs `.SZ` Shenzhen · `.T` Japan). "
+                         "Nothing was saved. Fix the ticker and Save again — or tick below to force it.")
+                st.checkbox("Save anyway (skip validation this once)", key="wl_save_anyway")
+                return
+        st.session_state.pop("wl_save_anyway", None)
         text = df[cols].to_csv(index=False)
         try:
             save_watchlist_text(text)
@@ -733,7 +895,7 @@ def reorder_watchlist_ui(wl_all):
         st.error("Drag component not available (streamlit-sortables not installed).")
         return
 
-    cols = ["group", "subgroup", "name", "ticker", "bbg", "currency"]
+    cols = ["group", "subgroup", "name", "ticker", "bbg", "currency", "alert_thr"]
     df = wl_all.reindex(columns=cols).fillna("")
 
     by_ticker, header_key, buckets, bidx, label_ticker = {}, {}, [], {}, {}
@@ -806,9 +968,13 @@ with st.sidebar:
         if view == "Returns":
             highlight_moves = st.toggle("Highlight big moves", value=True,
                                         help="Shade a cell green/red for outsized moves: 1D≥5% · 1W≥10% · 1M≥20% · 3M≥30% · 1Yr≥50%.")
+            show_earn = st.toggle("📅 Earnings dates", value=not gh_enabled(),
+                                  help="Next-earnings column (Yahoo calendar — populates on local runs; "
+                                       "usually blank on the cloud). First fetch ~10s, then cached 12h.")
             sort_opts = ["Group order", "1D %", "1W %", "1M %", "3M %", "1Yr %", "Price", "Mkt Cap $bn", "Name"]
         else:
             highlight_moves = False
+            show_earn = False
             sort_opts = ["Group order", "Fwd P/E", "Rev gr FY1 %", "EPS gr FY1 %",
                          "Rev gr LFY %", "EPS gr LFY %", "ROE %", "Margin %", "Name"]
         sort_by = st.selectbox("Sort names by", sort_opts, index=0,
@@ -841,7 +1007,7 @@ if wl.empty:
 tick = st_autorefresh(interval=interval * 1000, key="auto") if (auto and st_autorefresh) else 0
 
 tickers = tuple(wl["ticker"])
-failures, foot = [], None
+failures, foot, hist = [], None, None
 
 if view == "Fundamentals":
     with st.spinner("Fetching fundamentals & consensus… (first load ~30–60s; cached 6h)"):
@@ -862,28 +1028,50 @@ else:
         hist = fetch_history(tickers)
         fx = fetch_fx()
         mcaps = fetch_mktcap(tickers)
-    stock_rows = []
+        earn = fetch_earnings(tickers) if show_earn else {}
+    stock_rows, tw_patched = [], []
     for _, r in wl.iterrows():
         s = hist.get(r["ticker"])
         if s is None or len(s) == 0:
+            t = r["ticker"].upper()
+            spot = fetch_tw_spot().get(t.split(".")[0]) if t.endswith((".TW", ".TWO")) else None
+            if spot:                                    # official TWSE/TPEx EOD fallback: Price + 1D
+                last, prev, asof = spot
+                stock_rows.append({
+                    "Group": r["group"], "Sub-group": r["subgroup"], "Name": r["name"],
+                    "Ticker": r["ticker"], "CCY": r["currency"], "Price": last,
+                    "Mkt Cap $bn": float("nan"), "1M chart": None,
+                    "1D %": pct(last, prev), "1W %": None, "1M %": None, "3M %": None,
+                    "1Yr %": None, "Earn": ""})
+                tw_patched.append(f"{r['name']} (TWSE/TPEx close {asof})")
+                continue
             failures.append(f"{r['name']} ({r['ticker']})")
             continue
-        stock_rows.append(stock_row(r, s, fx, mcaps.get(r["ticker"])))
+        stock_rows.append(stock_row(r, s, fx, mcaps.get(r["ticker"]), earn.get(r["ticker"], "")))
     if not stock_rows:
         st.error("No data returned. Yahoo may be rate-limiting — hit Refresh in a moment.")
         st.stop()
     rows_all = stock_rows
     cols_act, agg_fn, label_fn = COLS, agg_row, group_label
     sdf = pd.DataFrame(stock_rows)
-    up = int((sdf["1D %"] > 0).sum()); down = int((sdf["1D %"] < 0).sum())
+    core = sdf[sdf["Group"] != BENCH_GROUP]            # indices don't compete for Top/Worst
+    if core.empty:
+        core = sdf
+    up = int((core["1D %"] > 0).sum()); down = int((core["1D %"] < 0).sum())
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Names", len(sdf))
     c2.metric("Up / Down (1D)", f"{up} / {down}")
-    if sdf["1D %"].notna().any():
-        g = sdf.loc[sdf["1D %"].idxmax()]; l = sdf.loc[sdf["1D %"].idxmin()]
+    if core["1D %"].notna().any():
+        g = core.loc[core["1D %"].idxmax()]; l = core.loc[core["1D %"].idxmin()]
         c3.metric(f"Top 1D · {g['Name']}", f"{g['1D %']:+.1f}%")
         c4.metric(f"Worst 1D · {l['Name']}", f"{l['1D %']:+.1f}%")
     foot = "FX→USD: " + ", ".join(f"{k} {v:.4f}" for k, v in fx.items() if k != "USD" and v)
+
+pick_col, _ = st.columns([0.45, 0.55])              # 📈 on-demand price chart for any covered name
+choice = pick_col.selectbox("📈 Chart a name", [""] + [f"{r['name']}  ·  {r['ticker']}" for _, r in wl.iterrows()],
+                            index=0, help="Type-ahead any name — 2y chart from the already-fetched history.")
+if choice:
+    detail_panel(choice.rsplit("·", 1)[-1].strip(), wl_all, hist)
 
 if layout == "Collapsible groups":
     for g in dict.fromkeys(r["Group"] for r in rows_all):
@@ -905,6 +1093,12 @@ else:
     render_table(df, [0] * len(flat), key=f"grid_single_{view}",
                  cols=cols_act, highlight=highlight_moves)
 
+with st.sidebar:                                        # export the CURRENT view, Excel-friendly
+    exp = pd.DataFrame(rows_all).drop(columns=["1M chart"], errors="ignore")
+    st.download_button("⬇ Export CSV", exp.to_csv(index=False).encode("utf-8-sig"),
+                       file_name=f"coverage_{view.lower()}_{datetime.now():%Y-%m-%d}.csv",
+                       mime="text/csv", help="Current view, one row per name (Excel-friendly UTF-8).")
+
 if view == "Fundamentals":
     st.caption("Fundamentals · **ROE, Net margin & LFY growth** computed from reported financials (works on the "
                "cloud) · **Fwd P/E & FY1 growth** = forward consensus from Yahoo (populates on local runs; "
@@ -913,6 +1107,9 @@ if view == "Fundamentals":
 st.caption(f"Last updated **{datetime.now():%H:%M:%S}**  ·  "
            + (f"🔄 auto-refresh every {interval}s · refresh #{tick}" if auto else "⏸ auto-refresh OFF")
            + (f"  ·  {foot}" if foot else ""))
+if view == "Returns" and tw_patched:
+    st.caption("🛟 Yahoo had no data for these — patched from the official TWSE/TPEx daily file "
+               "(last completed session; Price + 1D only): " + "; ".join(tw_patched))
 if view == "Returns" and failures:
     st.warning("No price history (shown as dropped): " + ", ".join(failures)
-               + ". Indices (HSI Tech, CSI Tech) and brand-new listings (e.g. Minimax) often lack Yahoo history.")
+               + ". Brand-new listings (e.g. Minimax) often lack Yahoo history.")

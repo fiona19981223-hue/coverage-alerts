@@ -34,6 +34,7 @@ jobs:
       - name: Run alerts
         env:
           TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+          DASHBOARD_URL: https://coverage-alerts-jn8fggvievbx7cbbnohbrb.streamlit.app/
           MODE: ${{ github.event.inputs.mode }}
         run: |
           if [ "$MODE" = "seed" ]; then python alerts.py --seed
