@@ -21,7 +21,7 @@ STEP 2 — Paste the URL
 
 STEP 3 — Test it
 ----------------
-  Open a terminal in C:\Users\jeffl\Test and run:
+  Open a terminal in C:\Users\jeffl\Claude project\5) Coverage-and-alert-agent and run:
       python alerts.py --test
   You should get HTTP 200/202 and a "✅ alerts connected" card in the channel.
   (If it fails, send me the HTTP code it prints.)

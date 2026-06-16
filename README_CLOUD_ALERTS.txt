@@ -20,7 +20,7 @@ STEP 2 — Create a PRIVATE repository
     Create.
 
 STEP 3 — Upload these files (keep the folder path for the workflow)
-  From C:\Users\jeffl\Test, upload:
+  From C:\Users\jeffl\Claude project\5) Coverage-and-alert-agent, upload:
     - alerts.py
     - watchlist.csv
     - alerts_state.json          (your already-seeded state -> quiet start)

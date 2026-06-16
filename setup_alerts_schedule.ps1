@@ -4,7 +4,7 @@
 
 $ErrorActionPreference = "Stop"
 $py  = (Get-Command python).Source
-$dir = "C:\Users\jeffl\Test"
+$dir = "C:\Users\jeffl\Claude project\5) Coverage-and-alert-agent"
 
 $action = New-ScheduledTaskAction -Execute $py -Argument "alerts.py" -WorkingDirectory $dir
 

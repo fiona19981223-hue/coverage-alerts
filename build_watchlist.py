@@ -13,8 +13,8 @@ import csv
 import openpyxl
 
 SRC = r"C:\Users\jeffl\OneDrive\文档\Aqua Lake Capital - Interview\JL coverage_v3.xlsx"
-OUT = r"C:\Users\jeffl\Test\watchlist.csv"
-REPORT = r"C:\Users\jeffl\Test\watchlist_report.txt"
+OUT = r"C:\Users\jeffl\Claude project\5) Coverage-and-alert-agent\watchlist.csv"
+REPORT = r"C:\Users\jeffl\Claude project\5) Coverage-and-alert-agent\watchlist_report.txt"
 
 # Indices / non-standard symbols that don't follow the code+exchange rule.
 OVERRIDES = {
