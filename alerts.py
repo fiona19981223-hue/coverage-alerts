@@ -27,6 +27,8 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
+from yquote import fetch_quotes, patch_series
+
 try:                                   # Windows console is cp1252 — --dry prints 🟢/🔴 safely
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 except Exception:
@@ -151,6 +153,7 @@ def main():
     tickers = wl["ticker"].tolist()
     hist = yf.download(tickers, period="2y", interval="1d", auto_adjust=False,
                        group_by="ticker", threads=True, progress=False)
+    quotes = fetch_quotes(tickers)     # fresh last price; the chart feed serves the latest bar as NaN
 
     state = load_state()
     movers, new_keys = [], []     # movers: list of (state_key, [lines]) — one Teams message each
@@ -167,6 +170,7 @@ def main():
                 s = None
         if s is None or len(s) < 2:
             continue
+        s = patch_series(s, quotes.get(t))     # overlay the true last session onto the stale chart series
         m, bar = moves(s)
         thr_row = dict(thr)                                 # per-name 1D override from watchlist alert_thr
         try:                                                # (blank/invalid -> default; e.g. 3 for indices,

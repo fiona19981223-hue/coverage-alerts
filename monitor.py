@@ -28,6 +28,8 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
+from yquote import fetch_quotes, patch_series, latest_date
+
 try:
     from streamlit_autorefresh import st_autorefresh
 except ImportError:
@@ -177,6 +179,14 @@ def fetch_history(tickers: tuple) -> dict:
         except Exception:
             out[t] = None
     return out
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def fetch_quotes_cached(tickers: tuple) -> dict:
+    """Fresh last price + prev close via Yahoo's crumb quote endpoint (best-effort, cached 2 min).
+    The chart feed (fetch_history) serves the latest bar as NaN until a session settles, so without
+    this the whole board runs a session stale. Returns {} if Yahoo throttles us — caller degrades."""
+    return fetch_quotes(list(tickers))
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
@@ -899,12 +909,28 @@ if view == "Fundamentals":
 else:
     with st.spinner("Fetching prices, FX and market caps… (first load ~10–20s)"):
         hist = fetch_history(tickers)
+        quotes = fetch_quotes_cached(tickers)                  # fresh last price (crumb quote endpoint)
+        hist = {t: patch_series(s, quotes.get(t)) for t, s in hist.items()}
         fx = fetch_fx()
         mcaps = fetch_mktcap(tickers)
+    name_by_t = {r["ticker"]: r["name"] for _, r in wl.iterrows()}
+    _asof = {t: latest_date(s) for t, s in hist.items() if s is not None and len(s)}
+    data_asof = max([d for d in _asof.values() if d], default=None)
+    behind_names = [name_by_t.get(t, t) for t, d in _asof.items() if data_asof and d and d < data_asof]
     stock_rows, tw_patched = [], []
     for _, r in wl.iterrows():
         s = hist.get(r["ticker"])
         if s is None or len(s) == 0:
+            q = quotes.get(r["ticker"])                  # no chart history but a live quote? Price + 1D
+            if q and q.get("price") is not None and q.get("prev_close"):
+                last = q["price"]
+                stock_rows.append({
+                    "Group": r["group"], "Sub-group": r["subgroup"], "Name": r["name"],
+                    "Ticker": r["ticker"], "CCY": r["currency"], "Price": last,
+                    "Mkt Cap $bn": float("nan"), "1M chart": None,
+                    "1D %": pct(last, q["prev_close"]), "1W %": None, "1M %": None,
+                    "3M %": None, "1Yr %": None})
+                continue
             t = r["ticker"].upper()
             spot = fetch_tw_spot().get(t.split(".")[0]) if t.endswith((".TW", ".TWO")) else None
             if spot:                                    # official TWSE/TPEx EOD fallback: Price + 1D
@@ -937,6 +963,13 @@ else:
         g = core.loc[core["1D %"].idxmax()]; l = core.loc[core["1D %"].idxmin()]
         c3.metric(f"Top 1D · {g['Name']}", f"{g['1D %']:+.1f}%")
         c4.metric(f"Worst 1D · {l['Name']}", f"{l['1D %']:+.1f}%")
+    if data_asof:
+        _m = f"📅 Prices as of **{data_asof:%d %b %Y}** (last completed session)"
+        if behind_names:
+            _m += (f"  ·  ⚠ **{len(behind_names)}** a session behind "
+                   "(Yahoo quote throttled — showing last good close): "
+                   + ", ".join(behind_names[:8]) + ("…" if len(behind_names) > 8 else ""))
+        st.caption(_m)
     foot = "FX→USD: " + ", ".join(f"{k} {v:.4f}" for k, v in fx.items() if k != "USD" and v)
 
 pick_col, _ = st.columns([0.45, 0.55])              # 📈 on-demand price chart for any covered name
