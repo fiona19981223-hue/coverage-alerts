@@ -24,6 +24,11 @@ concurrency:
 jobs:
   alert:
     runs-on: ubuntu-latest
+    # Runs take ~30s. Without a bound, a hung run (e.g. yfinance stalling on a rate-limit) would
+    # hold the concurrency group for GitHub's 6h default and cancel every queued tick behind it.
+    # 10 min turns a possible 6-hour blackout into one missed tick — the next run re-detects the
+    # move anyway (alerts.py de-dupes on ticker|period|bar-date, so nothing is lost).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
